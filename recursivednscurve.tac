@@ -46,5 +46,7 @@ ignoredRegexp = re.compile('starting on|(?:Starting|Stopping) protocol|UDP Port 
 def filterFunc(event):
     if ignoredRegexp.search(event['message'][0]):
         return
+    elif 'cache' in event['message'][0].lower():
+        event['system'] = 'dnscache'
     logfile.emit(event)
 application.setComponent(log.ILogObserver, filterFunc)
