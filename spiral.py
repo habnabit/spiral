@@ -8,6 +8,8 @@ from nacl.public import PublicKey, PrivateKey, Box
 from twisted.names.client import Resolver as NonrecursiveResolver
 from twisted.names.root import Resolver as RecursiveResolver
 from twisted.names.dns import DNSDatagramProtocol
+from twisted.names.error import ResolverError
+from twisted.internet.defer import maybeDeferred
 
 
 class DNSCurveBase32Encoder(object):
@@ -112,3 +114,13 @@ class DNSCurveResolver(NonrecursiveResolver):
 class DNSCurveRecursiveResolver(RecursiveResolver):
     def buildResolver(self, query, servers):
         return DNSCurveResolver(servers, reactor=self._reactor)
+
+    def _discoveredAuthority(self, response, query, timeout, queriesLeft):
+        d = maybeDeferred(RecursiveResolver._discoveredAuthority, self, response, query, timeout, queriesLeft)
+        @d.addErrback
+        def trapStuckError(f):
+            if not f.check(ResolverError) and f.value.args[0] != (
+                    "Stuck at response without answers or delegation"):
+                return f
+            return ([], response.authority, response.additional)
+        return d
