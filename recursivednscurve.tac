@@ -2,24 +2,41 @@ import sys
 import re
 
 from twisted.application import service, internet
-from twisted.internet.base import ThreadedResolver
-from twisted.internet.defer import Deferred
-from twisted.internet import reactor
-from twisted.names.root import bootstrap
+from twisted.internet import defer, reactor
+from twisted.names.root import DeferredResolver
 from twisted.names.cache import CacheResolver
 from twisted.names import dns, hosts, server
 from twisted.python import log
 
-from spiral import DNSCurveRecursiveResolver
+from spiral import DNSCurveRecursiveResolver, DNSCurveResolver
+
+
+def bootstrap(resolver):
+    domains = [chr(ord('a') + i) for i in range(13)]
+    L = [resolver.lookupAddress('%s.root-servers.net' % d) for d in domains]
+    d = defer.DeferredList(L)
+    @d.addCallback
+    def cb(results):
+        hints = []
+        for success, result in results:
+            if not success:
+                continue
+            answers, _, _ = result
+            hints.extend(a.payload.dottedQuad() for a in answers if a.payload.TYPE == 1)
+        return DNSCurveRecursiveResolver(hints)
+    return DeferredResolver(d)
 
 
 def makeService():
-    resolver = bootstrap(ThreadedResolver(reactor))
-    d = Deferred()
+    resolver = bootstrap(DNSCurveResolver(servers=[
+        (None, '8.8.8.8', 53),
+        (None, '8.8.4.4', 53)
+    ], reactor=reactor))
+    d = defer.Deferred()
     resolver.waiting.append(d)
     @d.addCallback
     def _resolverDone(resolver):
-        resolver.__class__ = DNSCurveRecursiveResolver
+        log.msg('recursive resolver ready', system='dnscurve')
 
     ca = [CacheResolver(verbose=2)]
     cl = [
@@ -27,7 +44,7 @@ def makeService():
         resolver,
     ]
 
-    f = server.DNSServerFactory([], ca, cl, verbose=False)
+    f = server.DNSServerFactory([], ca, cl, verbose=True)
     f.noisy = False
     p = dns.DNSDatagramProtocol(f)
     ret = service.MultiService()
@@ -48,5 +65,7 @@ def filterFunc(event):
         return
     elif 'cache' in event['message'][0].lower():
         event['system'] = 'dnscache'
+    elif event['system'] != 'dnscurve':
+        event['system'] = 'dns'
     logfile.emit(event)
 application.setComponent(log.ILogObserver, filterFunc)
