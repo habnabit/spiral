@@ -6,10 +6,11 @@ from keccak import Sponge
 from nacl.exceptions import CryptoError
 from nacl.public import PublicKey, PrivateKey, Box
 from twisted.names.client import Resolver as NonrecursiveResolver
-from twisted.names.root import Resolver as RecursiveResolver
 from twisted.names.dns import DNSDatagramProtocol
 from twisted.names.error import ResolverError
+from twisted.names.root import Resolver as RecursiveResolver
 from twisted.internet.defer import maybeDeferred
+from twisted.python import log
 
 
 class DNSCurveBase32Encoder(object):
@@ -68,6 +69,7 @@ class DNSCurveDatagramProtocol(DNSDatagramProtocol):
     def writeMessage(self, message, address):
         pubkey = self.getPublicKeyForAddress(address)
         if pubkey is not None:
+            log.msg('issuing DNSCurve query to', address, system='dnscurve')
             box = Box(self._key, pubkey)
             nonce = self._nonceSource.squeeze(12)
             query = (
