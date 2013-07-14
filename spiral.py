@@ -13,6 +13,10 @@ from twisted.internet.defer import maybeDeferred
 from twisted.python import log
 
 
+nonceSource = Sponge(1152, 448)
+nonceSource.absorb(os.urandom(64))
+
+
 class DNSCurveBase32Encoder(object):
     _digits = '0123456789bcdfghjklmnpqrstuvwxyz'
 
@@ -57,8 +61,6 @@ class DNSCurveDatagramProtocol(DNSDatagramProtocol):
         self.serverHosts = serverHosts
         self._key = PrivateKey.generate()
         self._outstandingDNSCurveQueries = {}
-        self._nonceSource = Sponge(1152, 448)
-        self._nonceSource.absorb(os.urandom(64))
 
     def getPublicKeyForAddress(self, address):
         host = self.serverHosts.get(address)
@@ -71,7 +73,7 @@ class DNSCurveDatagramProtocol(DNSDatagramProtocol):
         if pubkey is not None:
             log.msg('issuing DNSCurve query to', address, system='dnscurve')
             box = Box(self._key, pubkey)
-            nonce = self._nonceSource.squeeze(12)
+            nonce = nonceSource.squeeze(12)
             query = (
                 'Q6fnvWj8'
                 + str(self._key.public_key)
