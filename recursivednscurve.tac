@@ -11,6 +11,9 @@ from twisted.python import log
 from spiral import DNSCurveRecursiveResolver, DNSCurveResolver
 
 
+PORT = 5053
+
+
 def bootstrap(resolver):
     domains = [chr(ord('a') + i) for i in range(13)]
     L = [resolver.lookupAddress('%s.root-servers.net' % d) for d in domains]
@@ -49,7 +52,7 @@ def makeService():
     p = dns.DNSDatagramProtocol(f)
     ret = service.MultiService()
     for (klass, arg) in [(internet.TCPServer, f), (internet.UDPServer, p)]:
-        s = klass(5053, arg)
+        s = klass(PORT, arg)
         s.setServiceParent(ret)
     return ret
 
