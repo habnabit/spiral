@@ -17,7 +17,7 @@ _MessageBase = collections.namedtuple('_Message', [
 ])
 
 
-class _Message(_MessageBase):
+class Message(_MessageBase):
     sizes = [192, 320, 576, 1024]
     resolutions = {'success': 0x800, 'failure': 0x1000}
 
@@ -93,7 +93,7 @@ uint64 = <anything{8}>:x -> _uint64.unpack(x)[0]
 range16 = uint16:delta uint16:span -> (delta, span)
 spans = (uint64:firstRangeSpan uint32:secondRangeDelta
     uint16:secondRangeSpan range16:third range16:fourth range16:fifth
-    range16:sixth) -> _makeIntervals([
+    range16:sixth) -> makeIntervals([
         (0, firstRangeSpan), (secondRangeDelta, secondRangeSpan), third,
         fourth, fifth, sixth])
 
@@ -110,8 +110,8 @@ _bindings = dict(
     _uint16=_uint16,
     _uint32=_uint32,
     _uint64=_uint64,
-    _Message=_Message,
-    _makeIntervals=_makeIntervals,
+    Message=Message,
+    makeIntervals=_makeIntervals,
 )
 
 messageParser = makeGrammar(messageGrammar, _bindings)

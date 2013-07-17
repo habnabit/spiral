@@ -1,4 +1,4 @@
-from __future__ import division
+from __future__ import division, absolute_import
 
 import os
 from random import SystemRandom, random
@@ -12,7 +12,7 @@ from twisted.internet import defer
 from twisted.internet.protocol import DatagramProtocol
 
 from spiral.curvecp.pynacl.interval import halfOpen
-from spiral.curvecp.pynacl.message import _Message, messageParser
+from spiral.curvecp.pynacl.message import Message, messageParser
 
 
 sysrandom = SystemRandom()
@@ -194,7 +194,7 @@ class CurveCPTransport(DatagramProtocol):
         if not data and self._received == self._weAcked:
             return
         print 'sent after %0.5fs' % (self.nextAction,)
-        message = _Message(
+        message = Message(
             self.counter,
             self.previousID,
             list(self._received)[:6],
