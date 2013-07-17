@@ -1,4 +1,4 @@
-from spiral import DNSCurveBase32Encoder
+from spiral.dnscurve import DNSCurveBase32Encoder
 
 
 known_pairs = [
