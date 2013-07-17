@@ -100,7 +100,7 @@ spans = (uint64:firstRangeSpan uint32:secondRangeDelta
 status = uint16:raw -> (raw & 0x7ff, 'success' if raw & 0x800 else 'failure' if raw & 0x1000 else None)
 
 message = (uint32:id uint32:previous spans:spans
-    status:(length, resolution) uint64:dataPos '\x00'* <anything{length}>:data end) -> _Message(
+    status:(length, resolution) uint64:dataPos '\x00'* <anything{length}>:data end) -> Message(
     id, previous, spans, resolution, dataPos, data
 )
 

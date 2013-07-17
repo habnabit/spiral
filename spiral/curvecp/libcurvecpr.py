@@ -5,7 +5,7 @@ from twisted.internet.protocol import DatagramProtocol
 from twisted.python import log
 
 from spiral.curvecp._libcurvecpr import C, ffi
-from spiral.nonce import nonceSource
+from spiral.entropy import nonceSource
 
 
 @ffi.callback('int(struct curvecpr_client *client, unsigned char *destination, size_t num)')

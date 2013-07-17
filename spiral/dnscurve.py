@@ -9,7 +9,7 @@ from twisted.names.root import Resolver as RecursiveResolver
 from twisted.internet.defer import maybeDeferred
 from twisted.python import log
 
-from spiral.nonce import nonceSource
+from spiral.entropy import nonceSource
 
 
 class DNSCurveBase32Encoder(object):
