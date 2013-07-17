@@ -8,7 +8,10 @@ from spiral.curvecp._libcurvecpr import C, ffi
 from spiral.entropy import nonceSource
 
 
-@ffi.callback('int(struct curvecpr_client *client, unsigned char *destination, size_t num)')
+NS = 1e9
+
+
+@ffi.callback('int(struct curvecpr_client_messager_glib *, unsigned char *, size_t)')
 def nextNonce(client, dest, num):
     print 'squeezing', num, 'bytes for', client, dest
     ffi.buffer(dest, num)[:] = nonceSource.squeeze(num)
@@ -17,8 +20,6 @@ def nextNonce(client, dest, num):
 
 class CurveCPTransport(DatagramProtocol):
     def __init__(self, host, port, serverKey, serverExtension, clientKey=None, clientExtension='\x00' * 16):
-        self.client = ffi.new('struct curvecpr_client[1]')
-        self.cf = ffi.new('struct curvecpr_client_cf[1]')
         self.host = host
         self.port = port
         self.serverKey = serverKey
@@ -27,27 +28,32 @@ class CurveCPTransport(DatagramProtocol):
             clientKey = PrivateKey.generate()
         self.clientKey = clientKey
         self.clientExtension = clientExtension
+        self._funcs = []
         self.setupClient()
 
     def setupClient(self):
+        self.client = ffi.new('struct curvecpr_client_messager_glib *')
+        self.client_cf = ffi.new('struct curvecpr_client_messager_glib_cf *')
         self.setupClientFunctions()
 
-        self.cf[0].my_extension = self.clientExtension
-        self.cf[0].my_global_pk = str(self.clientKey.public_key)
-        self.cf[0].my_global_sk = str(self.clientKey)
+        self.client_cf.pending_maximum = 2 ** 32
+        self.client_cf.sendmarkq_maximum = 2 ** 16
+        self.client_cf.recvmarkq_maximum = 2 ** 16
 
-        self.cf[0].their_extension = self.serverExtension
-        self.cf[0].their_global_pk = str(self.serverKey)
-        self.cf[0].their_domain_name = 'example\0com\0'
+        self.client_cf[0].my_extension = self.clientExtension
+        self.client_cf[0].my_global_pk = str(self.clientKey.public_key)
+        self.client_cf[0].my_global_sk = str(self.clientKey)
 
-        C.curvecpr_client_new(self.client, self.cf)
+        self.client_cf[0].their_extension = self.serverExtension
+        self.client_cf[0].their_global_pk = str(self.serverKey)
+        self.client_cf[0].their_domain_name = 'example\0com\0'
+
+        C.curvecpr_client_messager_glib_new(self.client, self.client_cf)
 
     def setupClientFunctions(self):
-        self._funcs = []
+        self.client_cf[0].ops.next_nonce = nextNonce
 
-        self.cf[0].ops.next_nonce = nextNonce
-
-        @ffi.callback('int(struct curvecpr_client *client, const unsigned char *buf, size_t num)')
+        @ffi.callback('int(struct curvecpr_client_messager_glib *, const unsigned char *, size_t)')
         def send(client, buf, num):
             print 'writing', num, 'bytes'
             try:
@@ -58,25 +64,27 @@ class CurveCPTransport(DatagramProtocol):
             else:
                 return 0
 
-        self.cf[0].ops.send = send
+        self.client_cf[0].ops.send = send
         self._funcs.append(send)
 
-        @ffi.callback('int(struct curvecpr_client *client, const unsigned char *buf, size_t num)')
+        @ffi.callback('int(struct curvecpr_client_messager_glib *, const unsigned char *, size_t)')
         def recv(client, buf, num):
             print 'want', num, 'bytes'
+            return 0
 
-        self.cf[0].ops.recv = recv
+        self.client_cf[0].ops.recv = recv
         self._funcs.append(recv)
 
     def startProtocol(self):
-        C.curvecpr_client_connected(self.client)
+        C.curvecpr_client_messager_glib_connected(self.client)
 
     def datagramReceived(self, data, host_port):
         print 'got', len(data), 'bytes'
-        C.curvecpr_client_recv(self.client, data, len(data))
+        C.curvecpr_client_messager_glib_recv(self.client, data, len(data))
 
     def write(self, data):
-        print 'writing', `data`
-        ret = C.curvecpr_client_send(self.client, data, len(data))
+        ret = C.curvecpr_client_messager_glib_send(self.client, data, len(data))
         if ret:
             print os.strerror(-ret)
+        else:
+            C.curvecpr_client_messager_glib_process_sendq(self.client)

@@ -3,46 +3,19 @@ from cffi import FFI
 ffi = FFI()
 ffi.cdef("""
 
-struct curvecpr_session {
-    /* Any extensions. */
-    unsigned char their_extension[16];
+typedef uint64_t crypto_uint64;
 
-    /* Curve25519 public/private keypairs. */
-    unsigned char their_global_pk[32];
+struct curvecpr_client_messager_glib;
 
-    /* These will be automatically generated and/or filled as needed. */
+struct curvecpr_client_messager_glib_ops {
+    int (*send)(struct curvecpr_client_messager_glib *cmg, const unsigned char *buf, size_t num);
+    int (*recv)(struct curvecpr_client_messager_glib *cmg, const unsigned char *buf, size_t num);
+    void (*finished)(struct curvecpr_client_messager_glib *cmg, enum curvecpr_block_eofflag flag);
 
-    /* Curve25519 public/private keypairs. */
-    unsigned char my_session_pk[32];
-    unsigned char my_session_sk[32];
-
-    unsigned char their_session_pk[32];
-
-    /* Calculated encryption keys. */
-    unsigned char my_global_their_global_key[32];
-    unsigned char my_global_their_session_key[32];
-    unsigned char my_session_their_global_key[32];
-    unsigned char my_session_their_session_key[32];
-
-    /* Server-specific data. */
-    unsigned char my_domain_name[256];
-
-    /* Private data. */
-    void *priv;
-
-    ...;
+    int (*next_nonce)(struct curvecpr_client_messager_glib *cmg, unsigned char *destination, size_t num);
 };
 
-struct curvecpr_client;
-
-struct curvecpr_client_ops {
-    int (*send)(struct curvecpr_client *client, const unsigned char *buf, size_t num);
-    int (*recv)(struct curvecpr_client *client, const unsigned char *buf, size_t num);
-
-    int (*next_nonce)(struct curvecpr_client *client, unsigned char *destination, size_t num);
-};
-
-struct curvecpr_client_cf {
+struct curvecpr_client_messager_glib_cf {
     /* Any extensions. */
     unsigned char my_extension[16];
 
@@ -55,34 +28,36 @@ struct curvecpr_client_cf {
     unsigned char their_global_pk[32];
     unsigned char their_domain_name[256];
 
-    struct curvecpr_client_ops ops;
+    /* Messager configuration. */
+    crypto_uint64 pending_maximum;
+    unsigned int sendmarkq_maximum;
+    unsigned int recvmarkq_maximum;
+
+    struct curvecpr_client_messager_glib_ops ops;
 
     void *priv;
 };
 
-struct curvecpr_client {
-    struct curvecpr_client_cf cf;
-    struct curvecpr_session session;
-
-    enum {
-        CURVECPR_CLIENT_PENDING,
-        CURVECPR_CLIENT_INITIATING,
-        CURVECPR_CLIENT_NEGOTIATED
-    } negotiated;
-    unsigned char negotiated_vouch[64];
-    unsigned char negotiated_cookie[96];
+struct curvecpr_client_messager_glib {
+    struct curvecpr_client_messager_glib_cf cf;
+    ...;
 };
 
-void curvecpr_client_new (struct curvecpr_client *client, const struct curvecpr_client_cf *cf);
-int curvecpr_client_connected (struct curvecpr_client *client);
-int curvecpr_client_recv (struct curvecpr_client *client, const unsigned char *buf, size_t num);
-int curvecpr_client_send (struct curvecpr_client *client, const unsigned char *buf, size_t num);
+void curvecpr_client_messager_glib_new (struct curvecpr_client_messager_glib *cmg, struct curvecpr_client_messager_glib_cf *cf);
+void curvecpr_client_messager_glib_dealloc (struct curvecpr_client_messager_glib *cmg);
+int curvecpr_client_messager_glib_connected (struct curvecpr_client_messager_glib *cmg);
+int curvecpr_client_messager_glib_send (struct curvecpr_client_messager_glib *cmg, const unsigned char *buf, size_t num);
+int curvecpr_client_messager_glib_recv (struct curvecpr_client_messager_glib *cmg, const unsigned char *buf, size_t num);
+unsigned char curvecpr_client_messager_glib_is_finished (struct curvecpr_client_messager_glib *cmg);
+int curvecpr_client_messager_glib_finish (struct curvecpr_client_messager_glib *cmg);
+int curvecpr_client_messager_glib_process_sendq (struct curvecpr_client_messager_glib *cmg);
+long long curvecpr_client_messager_glib_next_timeout (struct curvecpr_client_messager_glib *cmg);
 
 """)
 
 C = ffi.verify("""
 
 #include "sodium/crypto_uint64.h"
-#include "curvecpr.h"
+#include "curvecpr_glib.h"
 
-""", libraries=['curvecpr'])
+""", libraries=['curvecpr', 'curvecpr-glib'])
