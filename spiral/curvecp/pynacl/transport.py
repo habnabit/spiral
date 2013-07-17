@@ -115,7 +115,7 @@ class CurveCPTransport(DatagramProtocol):
             + self._packed_nonce
             + self._box.encrypt(message.pack(), self._full_nonce('M')).ciphertext)
         self.transport.write(packet, (self.host, self.port))
-        self.sentMessageAt[message.id] = self.lastMessage = time.time()
+        self.sentMessageAt[message.id] = self.chicago.lastMessage = time.time()
         self._weAcked.update(message.ranges)
 
     def datagram_message(self, data):
@@ -134,8 +134,8 @@ class CurveCPTransport(DatagramProtocol):
 
         sentAt = self.sentMessageAt.pop(message.previousID, None)
         if sentAt is not None:
-            self._processDelta(now, now - sentAt)
         print 'in', message
+            self.chicago.processDelta(now, now - sentAt)
         if message.id:
             self.previousID = message.id
         self._theyAcked.update(message.ranges)
@@ -199,10 +199,7 @@ class CurveCPTransport(DatagramProtocol):
         self.sendMessage(message)
 
     def reschedule(self):
-        nextActionAt = time.time() + 1
-        if self.lastMessage:
-            nextActionAt = min(nextActionAt, self.lastMessage + self.secPerMessage)
-        self.nextAction = nextAction = max(nextActionAt - time.time(), 0.0001)
+        nextAction = self.nextAction = self.chicago.nextAction()
         if self.delayedCall is not None:
             self.delayedCall.reset(nextAction)
         else:
