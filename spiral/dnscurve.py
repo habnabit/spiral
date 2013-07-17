@@ -1,8 +1,5 @@
 from __future__ import division
 
-import os
-
-from keccak import Sponge
 from nacl.exceptions import CryptoError
 from nacl.public import PublicKey, PrivateKey, Box
 from twisted.names.client import Resolver as NonrecursiveResolver
@@ -12,9 +9,7 @@ from twisted.names.root import Resolver as RecursiveResolver
 from twisted.internet.defer import maybeDeferred
 from twisted.python import log
 
-
-nonceSource = Sponge(1152, 448)
-nonceSource.absorb(os.urandom(64))
+from spiral.nonce import nonceSource
 
 
 class DNSCurveBase32Encoder(object):
