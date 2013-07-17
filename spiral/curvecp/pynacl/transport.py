@@ -5,7 +5,7 @@ import os
 import struct
 import time
 
-from blist import sortedlist
+#from blist import sortedlist
 from interval import IntervalSet
 from nacl.public import PublicKey, PrivateKey, Box
 from twisted.internet import defer, task
@@ -13,12 +13,11 @@ from twisted.internet.protocol import DatagramProtocol
 
 from spiral.curvecp.pynacl.chicago import Chicago
 from spiral.curvecp.pynacl.interval import halfOpen
-from spiral.curvecp.pynacl.message import Message, messageParser
-from spiral.entropy import random
+from spiral.curvecp.pynacl.message import Message, parseMessage
 
 
 QueuedMessage = collections.namedtuple('QueuedMessage', [
-    'interval', 'lowerBound', 'deferred', 'sentAt', 'data',
+    'interval', 'lowerBound', 'deferreds', 'sentAt', 'data',
 ])
 
 def showMessage(tag, message, sentAt=None):
@@ -44,7 +43,7 @@ class CurveCPTransport(DatagramProtocol):
         self.outbuffer = []
         self.received = bytearray()
         self.previousID = 0
-        self.fragment = sortedlist()
+        self.fragment = []
         self.chicago = Chicago()
         self.sentMessageAt = {}
         self.delayedCall = None
@@ -57,17 +56,17 @@ class CurveCPTransport(DatagramProtocol):
         print 'they acked', self._theyAcked
 
     def nextNonce(self):
-        self._nonce = (self._nonce + 1) % (2 ** 64)
+        self._nonce += 1
 
     @property
     def _packed_nonce(self):
-        return struct.pack('!Q', self._nonce)
+        return struct.pack('<Q', self._nonce)
 
     def _full_nonce(self, which):
         return 'CurveCP-client-' + which + self._packed_nonce
 
     def startProtocol(self):
-        self._nonce = random.randrange(2 ** 64)
+        self._nonce = 0
         self._key = PrivateKey.generate()
         self._box = Box(self._key, self.serverKey)
         packet = (
@@ -118,10 +117,6 @@ class CurveCPTransport(DatagramProtocol):
         self.reschedule()
         self.looper.start(10)
 
-        from twisted.internet import reactor
-        for x in xrange(500):
-            reactor.callLater(x * 0.1 + 1, self.write, ('%d\n' % (x,)) * 1028 + 'hi')
-
     def sendMessage(self, message):
         self.nextNonce()
         packet = (
@@ -131,6 +126,9 @@ class CurveCPTransport(DatagramProtocol):
             + str(self._key.public_key)
             + self._packed_nonce
             + self._box.encrypt(message.pack(), self._full_nonce('M')).ciphertext)
+        packed = message.pack()
+        assert not len(packet) % 16
+        assert not len(packed) % 16
         self.transport.write(packet, (self.host, self.port))
         self.sentMessageAt[message.id] = self.chicago.lastMessage = time.time()
         self._weAcked.update(message.ranges)
@@ -141,7 +139,7 @@ class CurveCPTransport(DatagramProtocol):
         assert data[24:40] == self.serverExtension
         now = time.time()
         nonce = 'CurveCP-server-M' + data[40:48]
-        parsed = messageParser(self._box.decrypt(data[48:], nonce)).message()
+        parsed = parseMessage(self._box.decrypt(data[48:], nonce))
         self.parseMessage(now, parsed)
 
     def parseMessage(self, now, message):
@@ -161,35 +159,43 @@ class CurveCPTransport(DatagramProtocol):
             if qm.interval & self._theyAcked:
                 qm.interval.difference_update(self._theyAcked)
                 if not qm.interval:
-                    qm.deferred.callback(time.time())
+                    for d in qm.deferreds:
+                        d.callback(now)
                     continue
             newbuffer.append(qm)
         self.outbuffer = newbuffer
         if not message.data:
             return
         i = halfOpen(message.dataPos, message.dataPos + len(message.data))
-        new = IntervalSet([i]) - self._received
+        messageInterval = IntervalSet([i])
+        reackInterval = None
+        intersection = self._received & messageInterval
+        if intersection:
+            reackInterval = intersection
+        if message.id:
+            self.sendAMessage(ackOnly=True, reackInterval=reackInterval)
+        new = messageInterval - self._received
         if not new:
             return
         self._received.add(i)
         newData = message.data[new.lower_bound() - i.lower_bound:new.upper_bound() - i.upper_bound or None]
-        self.fragment.add((i.lower_bound, newData))
-        if message.id:
-            self.sendAMessage(ackOnly=True)
+        self.fragment.append((i.lower_bound, newData))
+        self.fragment.sort()
         if len(self._received) > 1 or self._received.lower_bound() != 0:
             return
         newData = ''.join([d for _, d in self.fragment])
-        self.fragment = sortedlist()
+        self.fragment = []
 
     def dataToSend(self, qm):
         dataPos = qm.interval.lower_bound()
-        return dataPos, qm.data[dataPos - qm.lowerBound:dataPos - qm.lowerBound + 1024], qm.sentAt
+        return dataPos, qm.data, qm.sentAt
 
-    def sendAMessage(self, ackOnly=False):
-        self.delayedCall = None
-        self.reschedule()
+    def sendAMessage(self, ackOnly=False, reackInterval=None):
+        if not ackOnly:
+            self.delayedCall = None
+            self.reschedule()
 
-        shouldAckData = self._received != self._weAcked
+        shouldAckData = self._received != self._weAcked or reackInterval
 
         shouldSendData = False
         if self.outbuffer and not ackOnly:
@@ -211,10 +217,11 @@ class CurveCPTransport(DatagramProtocol):
         else:
             dataPos, data, sentAt = 0, '', None
             messageID = 0
+        intervalToAck = self._received or reackInterval or self._received
         message = Message(
             messageID,
             self.previousID,
-            list(self._received)[:6],
+            list(intervalToAck)[:6],
             None,
             dataPos,
             data,
@@ -235,10 +242,20 @@ class CurveCPTransport(DatagramProtocol):
     def write(self, data):
         if not data:
             return defer.succeed(None)
-        d = defer.Deferred()
-        lowerBound = self._sent.upper_bound() if self._sent else 0
-        dataRange = halfOpen(lowerBound, lowerBound + len(data))
-        self.outbuffer.append(QueuedMessage(
-            IntervalSet([dataRange]), lowerBound, d, [], data))
-        self._sent.add(dataRange)
-        return d
+        ds = [defer.Deferred()]
+        while data:
+            if self.outbuffer and len(self.outbuffer[-1].data) < 1024:
+                lastQM = self.outbuffer.pop()
+                data = lastQM.data + data
+                ds.extend(lastQM.deferreds)
+                lowerBound = lastQM.lowerBound
+            else:
+                lowerBound = self._sent.upper_bound() if self._sent else 0
+            queueableData = data[:1024]
+            dataRange = halfOpen(lowerBound, lowerBound + len(queueableData))
+            self.outbuffer.append(QueuedMessage(
+                IntervalSet([dataRange]), lowerBound,
+                ds if len(data) <= 1024 else [], [], queueableData))
+            self._sent.add(dataRange)
+            data = data[1024:]
+        return ds[0]

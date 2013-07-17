@@ -83,6 +83,46 @@ def _makeIntervals(ranges):
     return ret
 
 
+# 0. 4 bytes: a message ID chosen by the sender.
+# 1. 4 bytes: if nonzero, a message ID received by the sender immediately
+#             before this message was sent.
+# 2. 8 bytes: a 64-bit unsigned integer in little-endian form, the number of
+#             bytes in the first range being acknowledged as part of this
+#             message. A range can include 0 bytes, in which case it does not
+#             actually acknowledge anything.
+# 3. 4 bytes: a 32-bit unsigned integer in little-endian form, the number of
+#             bytes between the first range and the second range.
+# 4. 2 bytes: a 16-bit unsigned integer in little-endian form, the number of
+#             bytes in the second range.
+# 5. 2 bytes: a 16-bit unsigned integer in little-endian form, the number of
+#             bytes between the second range and the third range.
+# 6. 2 bytes: a 16-bit unsigned integer in little-endian form, the number of
+#             bytes in the third range.
+# 7. 2 bytes: a 16-bit unsigned integer in little-endian form, the number of
+#             bytes between the third range and the fourth range.
+# 8. 2 bytes: a 16-bit unsigned integer in little-endian form, the number of
+#             bytes in the fourth range.
+# 9. 2 bytes: a 16-bit unsigned integer in little-endian form, the number of
+#             bytes between the fourth range and the fifth range.
+# 10. 2 bytes: a 16-bit unsigned integer in little-endian form, the number of
+#              bytes in the fifth range.
+# 11. 2 bytes: a 16-bit unsigned integer in little-endian form, the number of
+#              bytes between the fifth range and the sixth range.
+# 12. 2 bytes: a 16-bit unsigned integer in little-endian form, the number of
+#              bytes in the sixth range.
+# 13. 2 bytes: a 16-bit unsigned integer in little-endian form, the sum of the
+#              following integers:
+#               - D, an integer between 0 and 1024, the size of the data block
+#                 being sent as part of this message.
+#               - SUCC, either 0 or 2048, where 2048 means that this block is
+#                 known to be at the end of the stream followed by success.
+#               - FAIL, either 0 or 4096, where 4096 means that this block is
+#                 known to be at the end of the stream followed by failure.
+# 14. 8 bytes: a 64-bit unsigned integer in little-endian form, the position of
+#              the first byte in the data block being sent. If D=0 but SUCC>0
+#              or FAIL>0 then this is the success/failure position, i.e., the
+#              total number of bytes in the stream.
+
 messageGrammar = """
 
 uint16 = <anything{2}>:x -> _uint16.unpack(x)[0]
@@ -113,4 +153,27 @@ _bindings = dict(
     makeIntervals=_makeIntervals,
 )
 
+
 messageParser = makeGrammar(messageGrammar, _bindings)
+def parsley_parseMessage(s):
+    print `s`,
+    ret = messageParser(s).message()
+    print ret
+    return ret
+
+
+messageStruct = struct.Struct('<IIQI10HQ')
+def struct_parseMessage(s):
+    unpacked = messageStruct.unpack_from(s)
+    rawRanges = unpacked[2:13]
+    it = itertools.chain([0], rawRanges)
+    intervals = _makeIntervals(zip(it, it))
+    rawStatus = unpacked[13]
+    length = rawStatus & 0x7ff
+    resolution = 'success' if rawStatus & 0x800 else 'failure' if rawStatus & 0x1000 else None
+    return Message(
+        unpacked[0], unpacked[1], intervals, resolution, unpacked[14], s[-length:]
+    )
+
+
+parseMessage = struct_parseMessage
