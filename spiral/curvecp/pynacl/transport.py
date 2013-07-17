@@ -1,5 +1,6 @@
 from __future__ import division, absolute_import
 
+import collections
 import os
 import struct
 import time
@@ -7,7 +8,7 @@ import time
 from blist import sortedlist
 from interval import IntervalSet
 from nacl.public import PublicKey, PrivateKey, Box
-from twisted.internet import defer
+from twisted.internet import defer, task
 from twisted.internet.protocol import DatagramProtocol
 
 from spiral.curvecp.pynacl.chicago import Chicago
@@ -15,6 +16,15 @@ from spiral.curvecp.pynacl.interval import halfOpen
 from spiral.curvecp.pynacl.message import Message, messageParser
 from spiral.entropy import random
 
+
+QueuedMessage = collections.namedtuple('QueuedMessage', [
+    'interval', 'lowerBound', 'deferred', 'sentAt', 'data',
+])
+
+def showMessage(tag, message, sentAt=None):
+    print tag, message.id, IntervalSet(message.ranges),
+    print halfOpen(message.dataPos, message.dataPos + len(message.data)),
+    print len(message.data), sentAt and len(sentAt)
 
 class CurveCPTransport(DatagramProtocol):
     def __init__(self, host, port, serverKey, serverExtension, clientKey=None, clientExtension='\x00' * 16):
@@ -36,9 +46,15 @@ class CurveCPTransport(DatagramProtocol):
         self.previousID = 0
         self.fragment = sortedlist()
         self.chicago = Chicago()
-        self.lastMessage = 0
         self.sentMessageAt = {}
         self.delayedCall = None
+        self.looper = task.LoopingCall(self.showRanges)
+
+    def showRanges(self):
+        print 'received  ', self._received
+        print 'we acked  ', self._weAcked
+        print 'sent      ', self._sent
+        print 'they acked', self._theyAcked
 
     def nextNonce(self):
         self._nonce = (self._nonce + 1) % (2 ** 64)
@@ -100,10 +116,11 @@ class CurveCPTransport(DatagramProtocol):
         self.awaiting = 'message'
         self.counter = 1
         self.reschedule()
+        self.looper.start(10)
 
         from twisted.internet import reactor
-        for x in xrange(5):
-            reactor.callLater(x * 10 + 1, self.write, ('%d\n' % (x,)) * 1028 + 'hi')
+        for x in xrange(500):
+            reactor.callLater(x * 0.1 + 1, self.write, ('%d\n' % (x,)) * 1028 + 'hi')
 
     def sendMessage(self, message):
         self.nextNonce()
@@ -134,19 +151,19 @@ class CurveCPTransport(DatagramProtocol):
 
         sentAt = self.sentMessageAt.pop(message.previousID, None)
         if sentAt is not None:
-        print 'in', message
             self.chicago.processDelta(now, now - sentAt)
+        showMessage('in', message)
         if message.id:
             self.previousID = message.id
         self._theyAcked.update(message.ranges)
         newbuffer = []
-        for dataRange, lowerBound, d, data in self.outbuffer:
-            if dataRange & self._theyAcked:
-                dataRange.difference_update(self._theyAcked)
-                if not dataRange:
-                    d.callback(time.time())
+        for qm in self.outbuffer:
+            if qm.interval & self._theyAcked:
+                qm.interval.difference_update(self._theyAcked)
+                if not qm.interval:
+                    qm.deferred.callback(time.time())
                     continue
-            newbuffer.append((dataRange, lowerBound, d, data))
+            newbuffer.append(qm)
         self.outbuffer = newbuffer
         if not message.data:
             return
@@ -157,46 +174,55 @@ class CurveCPTransport(DatagramProtocol):
         self._received.add(i)
         newData = message.data[new.lower_bound() - i.lower_bound:new.upper_bound() - i.upper_bound or None]
         self.fragment.add((i.lower_bound, newData))
+        if message.id:
+            self.sendAMessage(ackOnly=True)
         if len(self._received) > 1 or self._received.lower_bound() != 0:
             return
         newData = ''.join([d for _, d in self.fragment])
         self.fragment = sortedlist()
-        print 'got', len(newData)
 
-    def dataToSend(self):
-        if not self.outbuffer:
-            return 0, ''
-        dataRange, lowerBound, _, data = self.outbuffer[0]
-        dataPos = dataRange.lower_bound()
-        return dataPos, data[dataPos - lowerBound:dataPos - lowerBound + 1024]
+    def dataToSend(self, qm):
+        dataPos = qm.interval.lower_bound()
+        return dataPos, qm.data[dataPos - qm.lowerBound:dataPos - qm.lowerBound + 1024], qm.sentAt
 
-        toSend = self._sent - self._theyAcked
-        for i in toSend:
-            break
-        else:
-            return 0, ''
-        data = self.data[i.lower_bound:min(i.upper_bound, i.lower_bound + 1024)]
-        return i.lower_bound, data
-
-    def sendAMessage(self):
+    def sendAMessage(self, ackOnly=False):
         self.delayedCall = None
         self.reschedule()
 
-        dataPos, data = self.dataToSend()
-        if not data and self._received == self._weAcked:
+        shouldAckData = self._received != self._weAcked
+
+        shouldSendData = False
+        if self.outbuffer and not ackOnly:
+            for qm in self.outbuffer[:1]:
+                shouldSendData = (
+                    not qm.sentAt
+                    or qm.sentAt[-1] + self.chicago.rttTimeout < time.time())
+                if shouldSendData:
+                    break
+        if not (shouldAckData or shouldSendData):
             return
-        print 'sent after %0.5fs' % (self.nextAction,)
+
+        if shouldSendData:
+            dataPos, data, sentAt = self.dataToSend(qm)
+            messageID = self.counter
+            self.counter += 1
+            if qm.sentAt:
+                self.chicago.timedOut()
+        else:
+            dataPos, data, sentAt = 0, '', None
+            messageID = 0
         message = Message(
-            self.counter,
+            messageID,
             self.previousID,
             list(self._received)[:6],
             None,
             dataPos,
             data,
         )
-        print 'out', message
-        self.counter += 1
         self.sendMessage(message)
+        if sentAt is not None:
+            sentAt.append(time.time())
+        showMessage('out', message, sentAt)
 
     def reschedule(self):
         nextAction = self.nextAction = self.chicago.nextAction()
@@ -212,6 +238,7 @@ class CurveCPTransport(DatagramProtocol):
         d = defer.Deferred()
         lowerBound = self._sent.upper_bound() if self._sent else 0
         dataRange = halfOpen(lowerBound, lowerBound + len(data))
-        self.outbuffer.append((IntervalSet([dataRange]), lowerBound, d, data))
+        self.outbuffer.append(QueuedMessage(
+            IntervalSet([dataRange]), lowerBound, d, [], data))
         self._sent.add(dataRange)
         return d
