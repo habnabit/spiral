@@ -55,7 +55,6 @@ class Message(_MessageBase):
             if not i.lower_closed or i.upper_closed:
                 raise ValueError('every interval must be half-open')
             if deltaPack is None and i.lower_bound != 0:
-
                 raise ValueError('first interval must start at 0')
             if deltaPack is not None:
                 ret.append(deltaPack.pack(i.lower_bound - prev))
@@ -100,8 +99,8 @@ spans = (uint64:firstRangeSpan uint32:secondRangeDelta
 status = uint16:raw -> (raw & 0x7ff, 'success' if raw & 0x800 else 'failure' if raw & 0x1000 else None)
 
 message = (uint32:id uint32:previous spans:spans
-    status:(length, resolution) uint64:dataPos '\x00'* <anything{length}>:data end) -> Message(
-    id, previous, spans, resolution, dataPos, data
+    status:(length, resolution) uint64:dataPos <anything*>:data end) -> Message(
+    id, previous, spans, resolution, dataPos, data[-length:],
 )
 
 """
