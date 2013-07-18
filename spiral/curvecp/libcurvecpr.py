@@ -8,6 +8,8 @@ from spiral.curvecp._libcurvecpr import C, ffi
 from spiral.entropy import nonceSource
 
 
+CLIENT_PENDING, CLIENT_INITIATING, CLIENT_NEGOTIATED = range(3)
+BLOCK_STREAM, BLOCK_EOF_FAILURE, BLOCK_EOF_SUCCESS = range(3)
 NS = 1e9
 
 
@@ -19,7 +21,8 @@ def nextNonce(client, dest, num):
 
 
 class CurveCPTransport(DatagramProtocol):
-    def __init__(self, host, port, serverKey, serverExtension, clientKey=None, clientExtension='\x00' * 16):
+    def __init__(self, reactor, host, port, serverKey, serverExtension, clientKey=None, clientExtension='\x00' * 16):
+        self.reactor = reactor
         self.host = host
         self.port = port
         self.serverKey = serverKey
@@ -30,6 +33,7 @@ class CurveCPTransport(DatagramProtocol):
         self.clientExtension = clientExtension
         self._funcs = []
         self.setupClient()
+        self.delayedCall = None
 
     def setupClient(self):
         self.client = ffi.new('struct curvecpr_client_messager_glib *')
@@ -46,7 +50,7 @@ class CurveCPTransport(DatagramProtocol):
 
         self.client_cf[0].their_extension = self.serverExtension
         self.client_cf[0].their_global_pk = str(self.serverKey)
-        self.client_cf[0].their_domain_name = 'example\0com\0'
+        C.curvecpr_util_encode_domain_name(self.client_cf[0].their_domain_name, 'example.com')
 
         C.curvecpr_client_messager_glib_new(self.client, self.client_cf)
 
@@ -69,11 +73,19 @@ class CurveCPTransport(DatagramProtocol):
 
         @ffi.callback('int(struct curvecpr_client_messager_glib *, const unsigned char *, size_t)')
         def recv(client, buf, num):
-            print 'want', num, 'bytes'
+            print 'got', num, 'bytes', `ffi.buffer(buf, num)[:]`
             return 0
 
         self.client_cf[0].ops.recv = recv
         self._funcs.append(recv)
+
+        @ffi.callback('void(struct curvecpr_client_messager_glib *, enum curvecpr_block_eofflag)')
+        def finished(client, flag):
+            print 'finished', flag
+            C.curvecpr_client_messager_glib_finish(self.client)
+
+        self.client_cf[0].ops.finished = finished
+        self._funcs.append(finished)
 
     def startProtocol(self):
         C.curvecpr_client_messager_glib_connected(self.client)
@@ -81,10 +93,24 @@ class CurveCPTransport(DatagramProtocol):
     def datagramReceived(self, data, host_port):
         print 'got', len(data), 'bytes'
         C.curvecpr_client_messager_glib_recv(self.client, data, len(data))
+        if self.client[0].client.negotiated != CLIENT_PENDING:
+            self._processSendQ()
 
     def write(self, data):
         ret = C.curvecpr_client_messager_glib_send(self.client, data, len(data))
         if ret:
             print os.strerror(-ret)
-        else:
+        self.reschedule()
+
+    def _processSendQ(self):
+        if self.client[0].client.negotiated != CLIENT_PENDING:
             C.curvecpr_client_messager_glib_process_sendq(self.client)
+        self.reschedule()
+
+    def reschedule(self):
+        nextActionIn = C.curvecpr_client_messager_glib_next_timeout(self.client) / NS
+        if self.delayedCall is not None and self.delayedCall.active():
+            self.delayedCall.reset(nextActionIn)
+        else:
+            self.delayedCall = self.reactor.callLater(
+                nextActionIn, self._processSendQ)

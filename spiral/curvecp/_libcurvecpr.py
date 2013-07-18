@@ -5,6 +5,21 @@ ffi.cdef("""
 
 typedef uint64_t crypto_uint64;
 
+struct curvecpr_client {
+    enum {
+        CURVECPR_CLIENT_PENDING,
+        CURVECPR_CLIENT_INITIATING,
+        CURVECPR_CLIENT_NEGOTIATED
+    } negotiated;
+    ...;
+};
+
+enum curvecpr_block_eofflag {
+    CURVECPR_BLOCK_STREAM,
+    CURVECPR_BLOCK_EOF_FAILURE,
+    CURVECPR_BLOCK_EOF_SUCCESS
+};
+
 struct curvecpr_client_messager_glib;
 
 struct curvecpr_client_messager_glib_ops {
@@ -40,6 +55,7 @@ struct curvecpr_client_messager_glib_cf {
 
 struct curvecpr_client_messager_glib {
     struct curvecpr_client_messager_glib_cf cf;
+    struct curvecpr_client client;
     ...;
 };
 
@@ -53,11 +69,14 @@ int curvecpr_client_messager_glib_finish (struct curvecpr_client_messager_glib *
 int curvecpr_client_messager_glib_process_sendq (struct curvecpr_client_messager_glib *cmg);
 long long curvecpr_client_messager_glib_next_timeout (struct curvecpr_client_messager_glib *cmg);
 
+int curvecpr_util_encode_domain_name (unsigned char *destination, const char *source);
+
 """)
 
 C = ffi.verify("""
 
 #include "sodium/crypto_uint64.h"
+#include "curvecpr.h"
 #include "curvecpr_glib.h"
 
 """, libraries=['curvecpr', 'curvecpr-glib'])
