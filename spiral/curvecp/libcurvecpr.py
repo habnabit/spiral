@@ -37,7 +37,6 @@ class CurveCPTransport(DatagramProtocol):
 
     def setupClient(self):
         self.client = ffi.new('struct curvecpr_client_messager_glib *')
-        self.client_cf = ffi.new('struct curvecpr_client_messager_glib_cf *')
         self.setupClientFunctions()
 
         self.client_cf.pending_maximum = 2 ** 32
@@ -55,7 +54,7 @@ class CurveCPTransport(DatagramProtocol):
         C.curvecpr_client_messager_glib_new(self.client, self.client_cf)
 
     def setupClientFunctions(self):
-        self.client_cf[0].ops.next_nonce = nextNonce
+        self.client_cf = ffi.new('struct curvecpr_client_messager_glib_cf *')
 
         @ffi.callback('int(struct curvecpr_client_messager_glib *, const unsigned char *, size_t)')
         def send(client, buf, num):
@@ -68,7 +67,6 @@ class CurveCPTransport(DatagramProtocol):
             else:
                 return 0
 
-        self.client_cf[0].ops.send = send
         self._funcs.append(send)
 
         @ffi.callback('int(struct curvecpr_client_messager_glib *, const unsigned char *, size_t)')
@@ -76,7 +74,6 @@ class CurveCPTransport(DatagramProtocol):
             print 'got', num, 'bytes', `ffi.buffer(buf, num)[:]`
             return 0
 
-        self.client_cf[0].ops.recv = recv
         self._funcs.append(recv)
 
         @ffi.callback('void(struct curvecpr_client_messager_glib *, enum curvecpr_block_eofflag)')
@@ -84,8 +81,16 @@ class CurveCPTransport(DatagramProtocol):
             print 'finished', flag
             C.curvecpr_client_messager_glib_finish(self.client)
 
-        self.client_cf[0].ops.finished = finished
         self._funcs.append(finished)
+
+        self.client_cf = ffi.new('struct curvecpr_client_messager_glib_cf *', {
+            'ops': {
+                'send': send,
+                'recv': recv,
+                'finished': finished,
+                'next_nonce': nextNonce,
+            },
+        })
 
     def startProtocol(self):
         C.curvecpr_client_messager_glib_connected(self.client)
