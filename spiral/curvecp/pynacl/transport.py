@@ -11,7 +11,9 @@ from interval import IntervalSet
 from nacl.public import PublicKey, PrivateKey, Box
 from twisted.internet import defer, task
 from twisted.internet.protocol import DatagramProtocol
+from twisted.python.failure import Failure
 
+import spiral.curvecp.errors as e
 from spiral.curvecp.pynacl.chicago import Chicago
 from spiral.curvecp.pynacl.interval import halfOpen
 from spiral.curvecp.pynacl.message import Message, parseMessage
@@ -41,8 +43,10 @@ def showMessage(tag, message, sentAt=None):
     print len(message.data), sentAt and len(sentAt)
 
 class CurveCPTransport(DatagramProtocol):
-    def __init__(self, reactor, host, port, serverKey, serverExtension, clientKey=None, clientExtension='\x00' * 16):
+    def __init__(self, reactor, protocol, host, port, serverKey, serverExtension, clientKey=None,
+                 clientExtension='\x00' * 16):
         self.reactor = reactor
+        self.protocol = protocol
         self.host = host
         self.port = port
         self.serverKey = serverKey
@@ -65,6 +69,7 @@ class CurveCPTransport(DatagramProtocol):
         self.delayedCalls = {}
         self.looper = task.LoopingCall(self.showRanges)
         self.messageQueue = []
+        self.deferred = defer.Deferred()
 
     def showRanges(self):
         print 'received  ', self._received
@@ -133,6 +138,8 @@ class CurveCPTransport(DatagramProtocol):
         self.counter = 1
         self.reschedule('message')
         self.looper.start(10)
+        self.protocol.makeConnection(self)
+        self.deferred.callback(self.protocol)
 
     def sendMessage(self, message):
         self.nextNonce()
@@ -162,8 +169,10 @@ class CurveCPTransport(DatagramProtocol):
 
     def parseMessage(self, now, message):
         if message.resolution:
-            print 'resolved'
-            self.reactor.stop()
+            excType = e.CurveCPConnectionDone if message.resolution == 'success' else e.CurveCPConnectionFailed
+            reason = Failure(excType())
+            self.protocol.connectionLost(reason)
+            return
         print 'in'
 
         sentAt = self.sentMessageAt.pop(message.previousID, None)
@@ -196,6 +205,7 @@ class CurveCPTransport(DatagramProtocol):
         if len(self._received) > 1 or self._received.lower_bound() != 0:
             return
         newData = ''.join([d for _, d in self.fragment])
+        self.protocol.dataReceived(newData)
         self.fragment = []
 
     def sendAMessage(self):
