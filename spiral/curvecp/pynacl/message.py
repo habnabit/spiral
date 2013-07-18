@@ -140,7 +140,7 @@ status = uint16:raw -> (raw & 0x7ff, 'success' if raw & 0x800 else 'failure' if 
 
 message = (uint32:id uint32:previous spans:spans
     status:(length, resolution) uint64:dataPos <anything*>:data end) -> Message(
-    id, previous, spans, resolution, dataPos, data[-length:],
+    id, previous, spans, resolution, dataPos, data[-length:] if length else '',
 )
 
 """
@@ -156,10 +156,7 @@ _bindings = dict(
 
 messageParser = makeGrammar(messageGrammar, _bindings)
 def parsley_parseMessage(s):
-    print `s`,
-    ret = messageParser(s).message()
-    print ret
-    return ret
+    return messageParser(s).message()
 
 
 messageStruct = struct.Struct('<IIQI10HQ')
@@ -171,8 +168,12 @@ def struct_parseMessage(s):
     rawStatus = unpacked[13]
     length = rawStatus & 0x7ff
     resolution = 'success' if rawStatus & 0x800 else 'failure' if rawStatus & 0x1000 else None
+    if not length:
+        data = ''
+    else:
+        data = s[-length:]
     return Message(
-        unpacked[0], unpacked[1], intervals, resolution, unpacked[14], s[-length:]
+        unpacked[0], unpacked[1], intervals, resolution, unpacked[14], data,
     )
 
 

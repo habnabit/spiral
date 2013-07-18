@@ -13,12 +13,11 @@ class Chicago(object):
         self.rttTimeout = 1
         self.rttPhase = 0
         self.rttSeenOlderHigh = self.rttSeenOlderLow = False
-        self.secPerMessage = 1
-        self.lastMessage = 0
         self.rttLastPanic = 0
+        self.secPerMessage = 1
+        self.lastSentAt = 0
 
     def processDelta(self, now, rtt):
-        print rtt,
         if not self.rttAverage:
             self.secPerMessage = rtt
             self.rttAverage = rtt
@@ -40,8 +39,6 @@ class Chicago(object):
             self.rttLowwater += rttDelta / 8192
         else:
             self.rttLowwater += rttDelta / 256
-
-        print self.rttHighwater, self.rttLowwater, self.rttAverage, rttTimeout
 
         if now < self.rttLastSpeedAdjustment + 16 * self.secPerMessage:
             return
@@ -86,18 +83,11 @@ class Chicago(object):
         if self.rttLastEdge:
             self.rttLastEdge = now
 
-    def nextAction(self):
-        now = time.time()
-        nextActionAt = now + 1
-        if self.lastMessage:
-            nextActionAt = self.lastMessage + self.secPerMessage
-        return max(nextActionAt - now, 0.0001)
+    def nextMessageIn(self, now):
+        return max(self.lastSentAt + self.secPerMessage - now, 0)
 
-    def timedOut(self):
-        print '!!! timeout !!!',
-        now = time.time()
+    def timedOut(self, now):
         if now > self.rttLastPanic + 4 * self.rttTimeout:
             self.secPerMessage *= 2
             self.rttLastPanic = now
             self.rttLastEdge = now
-        print self.secPerMessage
