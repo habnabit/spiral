@@ -29,8 +29,9 @@ class Chicago(object):
         self.rttAverage += rttDelta / 8
         rttDelta = abs(rttDelta)
         rttDelta -= self.rttDeviation
-        rttTimeout = self.rttAverage + 4 * self.rttDeviation
-        rttTimeout += 8 * self.secPerMessage
+        self.rttDeviation += rttDelta / 4
+        self.rttTimeout = self.rttAverage + 4 * self.rttDeviation
+        self.rttTimeout += 8 * self.secPerMessage
 
         rttDelta = rtt - self.rttHighwater
         self.rttHighwater += rttDelta / 1024
@@ -41,6 +42,7 @@ class Chicago(object):
             self.rttLowwater += rttDelta / 256
 
         if now < self.rttLastSpeedAdjustment + 16 * self.secPerMessage:
+            self._finalRttAdjustments(now)
             return
 
         if now - self.rttLastSpeedAdjustment > 10:
