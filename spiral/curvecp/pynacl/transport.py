@@ -215,8 +215,7 @@ class CurveCPTransport(DatagramProtocol):
             qd.sentAt.append(now)
         else:
             print "doing nothing, let's wait"
-            self.cancel('message')
-            return
+            return False
 
         message = Message(
             messageID,
@@ -227,6 +226,7 @@ class CurveCPTransport(DatagramProtocol):
             data,
         )
         self.sendMessage(message)
+        return True
 
     def reschedule(self, what, nextActionIn=None):
         now = time.time()
@@ -249,11 +249,13 @@ class CurveCPTransport(DatagramProtocol):
             delayedCall.cancel()
 
     def _scheduledAction(self, what):
-        self.reschedule(what)
+        reschedule = True
         if what == 'message':
-            self.sendAMessage()
+            reschedule = self.sendAMessage()
         else:
             self.messageQueue.append(what)
+        if reschedule:
+            self.reschedule(what)
 
     def enqueue(self, data=None):
         self.reschedule('message')
