@@ -42,132 +42,51 @@ def showMessage(tag, message, sentAt=None):
     print halfOpen(message.dataPos, message.dataPos + len(message.data)),
     print len(message.data), sentAt and len(sentAt)
 
-class CurveCPTransport(DatagramProtocol):
-    def __init__(self, reactor, protocol, host, port, serverKey, serverExtension, clientKey=None,
-                 clientExtension='\x00' * 16):
+class _CurveCPBaseTransport(DatagramProtocol):
+    def __init__(self, reactor, protocol, serverKey):
         self.reactor = reactor
         self.protocol = protocol
-        self.host = host
-        self.port = port
         self.serverKey = serverKey
-        self.serverExtension = serverExtension
-        if clientKey is None:
-            clientKey = PrivateKey.generate()
-        self.clientKey = clientKey
-        self.clientExtension = clientExtension
-        self.awaiting = 'cookie'
         self._received = IntervalSet()
         self._weAcked = IntervalSet()
         self._sent = IntervalSet()
         self._theyAcked = IntervalSet()
         self.outbuffer = []
-        self.received = bytearray()
         self.previousID = 0
         self.fragment = []
         self.chicago = Chicago()
         self.sentMessageAt = {}
         self.delayedCalls = {}
-        self.looper = task.LoopingCall(self.showRanges)
         self.messageQueue = []
         self.deferred = defer.Deferred()
         self.lastAck = 0
+        self._nonce = 0
         self.datafile = open('data.csv', 'w')
 
-    def showRanges(self):
-        print 'received  ', self._received
-        print 'we acked  ', self._weAcked
-        print 'sent      ', self._sent
-        print 'they acked', self._theyAcked
-
-    def nextNonce(self):
-        self._nonce += 1
-
-    @property
-    def _packed_nonce(self):
-        return struct.pack('<Q', self._nonce)
-
-    def _full_nonce(self, which):
-        return 'CurveCP-client-' + which + self._packed_nonce
-
-    def startProtocol(self):
-        self._nonce = 0
-        self._key = PrivateKey.generate()
-        self._box = Box(self._key, self.serverKey)
-        packet = (
-            'QvnQ5XlH'
-            + self.serverExtension
-            + self.clientExtension
-            + str(self._key.public_key)
-            + '\x00' * 64
-            + self._packed_nonce
-            + self._box.encrypt('\x00' * 64, self._full_nonce('H')).ciphertext)
-        self.transport.write(packet, (self.host, self.port))
-
+    messageMap = {}
     def datagramReceived(self, data, host_port):
-        meth = getattr(self, 'datagram_' + self.awaiting)
-        meth(data)
+        handler = self.messageMap.get(data[:8])
+        if not handler:
+            return
+        meth = getattr(self, 'datagram_' + handler)
+        meth(data, host_port)
 
-    def datagram_cookie(self, data):
-        assert len(data) == 200
-        assert data[:8] == 'RL3aNMXK'
-        assert data[8:24] == self.clientExtension
-        assert data[24:40] == self.serverExtension
-        nonce = data[40:56]
-        data = self._box.decrypt(data[56:200], 'CurveCPK' + nonce)
-        self._serverShortKey = PublicKey(data[:32])
-        self._box = Box(self._key, self._serverShortKey)
-        self._cookie = data[32:144]
-        message = '\0' * 192
-        nonce = os.urandom(16)
-        longLongBox = Box(self.clientKey, self.serverKey)
-        initiatePacket = (
-            str(self.clientKey.public_key)
-            + nonce
-            + longLongBox.encrypt(str(self._key.public_key), 'CurveCPV' + nonce).ciphertext
-            + "\aexample\003com".ljust(256, '\x00')
-            + message)
-        self.nextNonce()
-        packet = (
-            'QvnQ5XlI'
-            + self.serverExtension
-            + self.clientExtension
-            + str(self._key.public_key)
-            + self._cookie
-            + self._packed_nonce
-            + self._box.encrypt(initiatePacket, self._full_nonce('I')).ciphertext)
-        self.transport.write(packet, (self.host, self.port))
-        self.awaiting = 'message'
-        self.counter = 1
-        self.reschedule('message')
-        self.looper.start(10)
-        self.protocol.makeConnection(self)
-        self.deferred.callback(self.protocol)
+    _nonceInfix = ''
+    def _encryptForNonce(self, which, box, data):
+        packedNonce = struct.pack('<Q', self._nonce)
+        self._nonce += 1
+        nonce = 'CurveCP-%s-%s%s' % (self._nonceInfix, which, packedNonce)
+        return packedNonce + box.encrypt(data, nonce).ciphertext
+
+    def _serializeMessage(self, message):
+        return ''
 
     def sendMessage(self, message):
-        self.nextNonce()
-        packet = (
-            'QvnQ5XlM'
-            + self.serverExtension
-            + self.clientExtension
-            + str(self._key.public_key)
-            + self._packed_nonce
-            + self._box.encrypt(message.pack(), self._full_nonce('M')).ciphertext)
-        packed = message.pack()
-        assert not len(packet) % 16
-        assert not len(packed) % 16
-        self.transport.write(packet, (self.host, self.port))
+        packet = self._serializeMessage(message)
+        self.transport.write(packet, self.peerHost)
         self.sentMessageAt[message.id] = self.chicago.lastSentAt = time.time()
         self._weAcked.update(message.ranges)
         print 'out', message.id, message.previousID
-
-    def datagram_message(self, data):
-        assert data[:8] == 'RL3aNMXM'
-        assert data[8:24] == self.clientExtension
-        assert data[24:40] == self.serverExtension
-        now = time.time()
-        nonce = 'CurveCP-server-M' + data[40:48]
-        parsed = parseMessage(self._box.decrypt(data[48:], nonce))
-        self.parseMessage(now, parsed)
 
     def parseMessage(self, now, message):
         if message.resolution:
@@ -304,3 +223,81 @@ class CurveCPTransport(DatagramProtocol):
             self._sent.add(dataRange)
             data = data[1024:]
         return ds[0]
+
+class CurveCPClientTransport(_CurveCPBaseTransport):
+    def __init__(self, reactor, protocol, serverKey, host, port,
+                 serverExtension, clientKey=None, clientExtension='\x00' * 16):
+        _CurveCPBaseTransport.__init__(self, reactor, protocol, serverKey)
+        self.peerHost = host, port
+        self.serverExtension = serverExtension
+        if clientKey is None:
+            clientKey = PrivateKey.generate()
+        self.clientKey = clientKey
+        self.clientExtension = clientExtension
+
+    messageMap = {
+        'RL3aNMXK': 'cookie',
+        'RL3aNMXM': 'message',
+    }
+    _nonceInfix = 'client'
+
+    def _serializeMessage(self, message):
+        return (
+            'QvnQ5XlM'
+            + self.serverExtension
+            + self.clientExtension
+            + str(self._clientShortKey.public_key)
+            + self._encryptForNonce('M', self._shortShortBox, message.pack()))
+
+    def startProtocol(self):
+        self._clientShortKey = PrivateKey.generate()
+        self._shortLongBox = Box(self._clientShortKey, self.serverKey)
+        packet = (
+            'QvnQ5XlH'
+            + self.serverExtension
+            + self.clientExtension
+            + str(self._clientShortKey.public_key)
+            + '\0' * 64
+            + self._encryptForNonce('H', self._shortLongBox, '\0' * 64))
+        self.transport.write(packet, self.peerHost)
+
+    def datagram_cookie(self, data, host_port):
+        assert len(data) == 200
+        assert data[:8] == 'RL3aNMXK'
+        assert data[8:24] == self.clientExtension
+        assert data[24:40] == self.serverExtension
+        packetNonce = data[40:56]
+        data = self._shortLongBox.decrypt(data[56:200], 'CurveCPK' + packetNonce)
+        self._serverShortKey = PublicKey(data[:32])
+        self._shortShortBox = Box(self._clientShortKey, self._serverShortKey)
+        self._cookie = data[32:144]
+        message = '\0' * 192
+        longLongNonce = os.urandom(16)
+        longLongBox = Box(self.clientKey, self.serverKey)
+        initiatePacket = (
+            str(self.clientKey.public_key)
+            + longLongNonce
+            + longLongBox.encrypt(str(self._clientShortKey.public_key), 'CurveCPV' + longLongNonce).ciphertext
+            + "\aexample\003com".ljust(256, '\x00')
+            + message)
+        packet = (
+            'QvnQ5XlI'
+            + self.serverExtension
+            + self.clientExtension
+            + str(self._clientShortKey.public_key)
+            + self._cookie
+            + self._encryptForNonce('I', self._shortShortBox, initiatePacket))
+        self.transport.write(packet, self.peerHost)
+        self.counter = 1
+        self.reschedule('message')
+        self.protocol.makeConnection(self)
+        self.deferred.callback(self.protocol)
+
+    def datagram_message(self, data, host_port):
+        assert data[:8] == 'RL3aNMXM'
+        assert data[8:24] == self.clientExtension
+        assert data[24:40] == self.serverExtension
+        now = time.time()
+        nonce = data[40:48]
+        parsed = parseMessage(self._shortShortBox.decrypt(data[48:], 'CurveCP-server-M' + nonce))
+        self.parseMessage(now, parsed)
