@@ -70,6 +70,7 @@ class CurveCPTransport(DatagramProtocol):
         self.looper = task.LoopingCall(self.showRanges)
         self.messageQueue = []
         self.deferred = defer.Deferred()
+        self.lastAck = 0
 
     def showRanges(self):
         print 'received  ', self._received
@@ -156,7 +157,7 @@ class CurveCPTransport(DatagramProtocol):
         self.transport.write(packet, (self.host, self.port))
         self.sentMessageAt[message.id] = self.chicago.lastSentAt = time.time()
         self._weAcked.update(message.ranges)
-        print 'out'
+        print 'out', message.id, message.previousID
 
     def datagram_message(self, data):
         assert data[:8] == 'RL3aNMXM'
@@ -173,7 +174,7 @@ class CurveCPTransport(DatagramProtocol):
             reason = Failure(excType())
             self.protocol.connectionLost(reason)
             return
-        print 'in'
+        print 'in', message.id, message.previousID
 
         sentAt = self.sentMessageAt.pop(message.previousID, None)
         if sentAt is not None:
@@ -209,6 +210,8 @@ class CurveCPTransport(DatagramProtocol):
         self.fragment = []
 
     def sendAMessage(self):
+        now = time.time()
+        nextActionIn = None
         if self.previousID:
             dataPos, data, sentAt = 0, '', None
             messageID, previousID = 0, self.previousID
@@ -223,9 +226,15 @@ class CurveCPTransport(DatagramProtocol):
             if qd.sentAt:
                 self.chicago.timedOut(now)
             qd.sentAt.append(now)
+        elif self.lastAck < now + 5:
+            dataPos, data, sentAt = 0, '', None
+            messageID, previousID = self.counter, 0
+            self.counter += 1
+            self.lastAck = now
+            nextActionIn = 10
         else:
             print "doing nothing, let's wait"
-            return False
+            return 60
 
         message = Message(
             messageID,
@@ -236,7 +245,7 @@ class CurveCPTransport(DatagramProtocol):
             data,
         )
         self.sendMessage(message)
-        return True
+        return nextActionIn
 
     def reschedule(self, what, nextActionIn=None):
         now = time.time()
@@ -259,13 +268,12 @@ class CurveCPTransport(DatagramProtocol):
             delayedCall.cancel()
 
     def _scheduledAction(self, what):
-        reschedule = True
+        nextActionIn = None
         if what == 'message':
-            reschedule = self.sendAMessage()
+            nextActionIn = self.sendAMessage()
         else:
             self.messageQueue.append(what)
-        if reschedule:
-            self.reschedule(what)
+        self.reschedule(what, nextActionIn=nextActionIn)
 
     def enqueue(self, data=None):
         self.reschedule('message')
