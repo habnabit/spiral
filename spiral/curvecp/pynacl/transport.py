@@ -9,7 +9,7 @@ import time
 #from blist import sortedlist
 from interval import IntervalSet
 from nacl.public import PublicKey, PrivateKey, Box
-from twisted.internet import defer, task
+from twisted.internet import defer
 from twisted.internet.protocol import DatagramProtocol
 from twisted.python.failure import Failure
 
@@ -61,6 +61,7 @@ class _CurveCPBaseTransport(DatagramProtocol):
         self.deferred = defer.Deferred()
         self.lastAck = 0
         self._nonce = 0
+        self.counter = 1
         self.datafile = open('data.csv', 'w')
 
     messageMap = {}
@@ -89,6 +90,7 @@ class _CurveCPBaseTransport(DatagramProtocol):
         print 'out', message.id, message.previousID
 
     def parseMessage(self, now, message):
+        message = parseMessage(message)
         if message.resolution:
             excType = e.CurveCPConnectionDone if message.resolution == 'success' else e.CurveCPConnectionFailed
             reason = Failure(excType())
@@ -288,7 +290,6 @@ class CurveCPClientTransport(_CurveCPBaseTransport):
             + self._cookie
             + self._encryptForNonce('I', self._shortShortBox, initiatePacket))
         self.transport.write(packet, self.peerHost)
-        self.counter = 1
         self.reschedule('message')
         self.protocol.makeConnection(self)
         self.deferred.callback(self.protocol)
@@ -299,5 +300,63 @@ class CurveCPClientTransport(_CurveCPBaseTransport):
         assert data[24:40] == self.serverExtension
         now = time.time()
         nonce = data[40:48]
-        parsed = parseMessage(self._shortShortBox.decrypt(data[48:], 'CurveCP-server-M' + nonce))
-        self.parseMessage(now, parsed)
+        decrypted = self._shortShortBox.decrypt(data[48:], 'CurveCP-server-M' + nonce)
+        self.parseMessage(now, decrypted)
+
+
+class CurveCPServerTransport(_CurveCPBaseTransport):
+    messageMap = {
+        'QvnQ5XlH': 'hello',
+        'QvnQ5XlI': 'initiate',
+        'QvnQ5XlM': 'message',
+    }
+    _nonceInfix = 'server'
+
+    def _serializeMessage(self, message):
+        return (
+            'RL3aNMXM'
+            + self.clientExtension
+            + self.serverExtension
+            + self._encryptForNonce('M', self._shortShortBox, message.pack()))
+
+    def datagram_hello(self, data, host_port):
+        self.serverExtension = data[8:24]
+        self.clientExtension = data[24:40]
+        self._clientShortKey = PublicKey(data[40:72])
+        self._serverShortKey = PrivateKey.generate()
+        nonce = data[136:144]
+        self._longShortBox = Box(self.serverKey, self._clientShortKey)
+        self._longShortBox.decrypt(data[144:224], 'CurveCP-client-H' + nonce)
+        self.cookie = os.urandom(96)
+        boxData = str(self._serverShortKey.public_key) + self.cookie
+        cookieNonce = os.urandom(16)
+        cookiePacket = (
+            'RL3aNMXK'
+            + self.serverExtension
+            + self.clientExtension
+            + cookieNonce
+            + self._longShortBox.encrypt(boxData, 'CurveCPK' + cookieNonce).ciphertext)
+        self.transport.write(cookiePacket, host_port)
+        self._shortShortBox = Box(self._serverShortKey, self._clientShortKey)
+        self.peerHost = host_port
+
+    def datagram_initiate(self, data, host_port):
+        assert data[8:24] == self.serverExtension
+        assert data[24:40] == self.clientExtension
+        assert data[40:72] == str(self._clientShortKey)
+        assert data[72:168] == self.cookie
+        nonce = data[168:176]
+        decrypted = self._shortShortBox.decrypt(data[176:], 'CurveCP-client-I' + nonce)
+        message = decrypted[352:]
+        self.parseMessage(time.time(), message)
+        self.reschedule('message')
+        self.protocol.makeConnection(self)
+        self.deferred.callback(self.protocol)
+
+    def datagram_message(self, data, host_port):
+        assert data[8:24] == self.serverExtension
+        assert data[24:40] == self.clientExtension
+        assert data[40:72] == str(self._clientShortKey)
+        nonce = data[72:80]
+        decrypted = self._shortShortBox.decrypt(data[80:], 'CurveCP-client-M' + nonce)
+        self.parseMessage(time.time(), decrypted)
