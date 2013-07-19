@@ -71,6 +71,7 @@ class CurveCPTransport(DatagramProtocol):
         self.messageQueue = []
         self.deferred = defer.Deferred()
         self.lastAck = 0
+        self.datafile = open('data.csv', 'w')
 
     def showRanges(self):
         print 'received  ', self._received
@@ -179,6 +180,7 @@ class CurveCPTransport(DatagramProtocol):
         sentAt = self.sentMessageAt.pop(message.previousID, None)
         if sentAt is not None:
             self.chicago.processDelta(now, now - sentAt)
+            self.chicago.writerow(now, self.datafile)
         if message.id:
             self.previousID = message.id
             self.enqueue()

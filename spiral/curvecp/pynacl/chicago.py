@@ -17,6 +17,11 @@ class Chicago(object):
         self.secPerMessage = 1
         self.lastSentAt = 0
 
+    def writerow(self, now, fobj):
+        import csv
+        csv.writer(fobj).writerow((now, self.rttTimeout, self.secPerMessage,
+                                   self.rttAverage, self.rttHighwater, self.rttLowwater))
+
     def processDelta(self, now, rtt):
         if not self.rttAverage:
             self.secPerMessage = rtt
