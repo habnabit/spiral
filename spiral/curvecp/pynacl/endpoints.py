@@ -1,6 +1,7 @@
 from nacl.public import PrivateKey
 
-from spiral.curvecp.pynacl.transport import CurveCPClientTransport, CurveCPServerTransport
+from spiral.curvecp.pynacl.server import CurveCPServerDispatcher
+from spiral.curvecp.pynacl.transport import CurveCPClientTransport
 
 
 class CurveCPClientEndpoint(object):
@@ -17,9 +18,8 @@ class CurveCPClientEndpoint(object):
         self.clientExtension = clientExtension
 
     def connect(self, fac):
-        proto = fac.buildProtocol(None)
         transport = CurveCPClientTransport(
-            self.reactor, proto, self.serverKey, self.host, self.port,
+            self.reactor, self.serverKey, fac, self.host, self.port,
             self.serverExtension, self.clientKey, self.clientExtension)
         self.reactor.listenUDP(0, transport)
         return transport.deferred
@@ -32,7 +32,5 @@ class CurveCPServerEndpoint(object):
         self.port = port
 
     def listen(self, fac):
-        proto = fac.buildProtocol(None)
-        transport = CurveCPServerTransport(self.reactor, proto, self.serverKey)
-        self.reactor.listenUDP(self.port, transport)
-        return transport.deferred
+        dispatcher = CurveCPServerDispatcher(self.reactor, self.serverKey, fac)
+        return self.reactor.listenUDP(self.port, dispatcher)

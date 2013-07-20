@@ -14,7 +14,7 @@ class Chicago(object):
         self.rttPhase = 0
         self.rttSeenOlderHigh = self.rttSeenOlderLow = False
         self.rttLastPanic = 0
-        self.secPerMessage = 1
+        self.secPerMessage = 0
         self.lastSentAt = 0
 
     def writerow(self, now, fobj):
