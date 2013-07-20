@@ -22,6 +22,13 @@ from spiral.curvecp.pynacl.message import Message, parseMessage
 
 
 _nonceStruct = struct.Struct('<Q')
+_helloStruct = struct.Struct('<8x16x16x32x64x8s80s')
+_cookieStruct = struct.Struct('<8x16x16x16s144s')
+_cookieInnerStruct = struct.Struct('<32s96s')
+_initiateStruct = struct.Struct('<8x16x16x32x96s8s')
+_initiateInnerStruct = struct.Struct('<32s16s48s256s')
+_serverMessageStruct = struct.Struct('<8x16x16x8s')
+_clientMessageStruct = struct.Struct('<8x16x16x32x8s')
 
 
 _QueuedDataBase = collections.namedtuple('_QueuedDataBase', [
@@ -224,6 +231,7 @@ class _CurveCPBaseTransport(DatagramProtocol):
     def write(self, data):
         if self.ourStreamEnd is not None or not data:
             return defer.succeed(None)
+        print 'writing', len(data),
         ds = [defer.Deferred()]
         while data:
             if self.outbuffer and len(self.outbuffer[-1].data) < 1024:
@@ -300,17 +308,17 @@ class CurveCPClientTransport(_CurveCPBaseTransport):
                 and data[24:40] == self.serverExtension)
 
     def datagram_cookie(self, data, host_port):
-        if len(data) != 200 or not self._verifyPacketStart(data):
+        if len(data) != _cookieStruct.size or not self._verifyPacketStart(data):
             print 'bad cookie'
             return
-        packetNonce = data[40:56]
+        nonce, encrypted = _cookieStruct.unpack(data)
         try:
-            decrypted = self._shortLongBox.decrypt(data[56:200], 'CurveCPK' + packetNonce)
+            decrypted = self._shortLongBox.decrypt(encrypted, 'CurveCPK' + nonce)
         except CryptoError:
             print 'bad cookie crypto'
             return
-        cookie = decrypted[32:144]
-        serverShortKey = PublicKey(decrypted[:32])
+        serverShortKeyString, cookie = _cookieInnerStruct.unpack(decrypted)
+        serverShortKey = PublicKey(serverShortKeyString)
         if self._cookie is None:
             self._cookie = cookie
             self._serverShortKey = serverShortKey
@@ -340,10 +348,10 @@ class CurveCPClientTransport(_CurveCPBaseTransport):
         self.transport.write(self.initiatePacket, self.peerHost)
 
     def datagram_message(self, data, host_port):
-        if data[8:24] != self.clientExtension or data[24:40] != self.serverExtension:
+        if not self._verifyPacketStart(data):
             print 'bad message'
             return
-        nonce = data[40:48]
+        nonce, = _serverMessageStruct.unpack_from(data)
         try:
             decrypted = self._shortShortBox.decrypt(data[48:], 'CurveCP-server-M' + nonce)
         except CryptoError:
@@ -398,12 +406,12 @@ class CurveCPServerTransport(_CurveCPBaseTransport):
                 and data[40:72] == str(self._clientShortKey))
 
     def datagram_hello(self, data, host_port):
-        if len(data) != 224 or not self._verifyPacketStart(data):
+        if len(data) != _helloStruct.size or not self._verifyPacketStart(data):
             print 'bad hello'
             return
-        nonce = data[136:144]
+        nonce, encrypted = _helloStruct.unpack(data)
         try:
-            self._longShortBox.decrypt(data[144:224], 'CurveCP-client-H' + nonce)
+            self._longShortBox.decrypt(encrypted, 'CurveCP-client-H' + nonce)
         except CryptoError:
             print 'bad hello crypto'
             return
@@ -421,20 +429,20 @@ class CurveCPServerTransport(_CurveCPBaseTransport):
         self.transport.write(self.cookiePacket, self.peerHost)
 
     def datagram_initiate(self, data, host_port):
-        if data[72:168] != self.cookie or not self._verifyPacketStart(data):
+        cookie, nonce = _initiateStruct.unpack_from(data)
+        if cookie != self.cookie or not self._verifyPacketStart(data):
             print 'bad initiate'
             return
-        nonce = data[168:176]
         try:
             decrypted = self._shortShortBox.decrypt(data[176:], 'CurveCP-client-I' + nonce)
         except CryptoError:
             print 'bad initiate crypto'
             return
-        clientKey = PublicKey(decrypted[:32])
+        clientKeyString, vouchNonce, encryptedVouch, serverDomain = _initiateInnerStruct.unpack_from(decrypted)
+        clientKey = PublicKey(clientKeyString)
         longLongBox = Box(self.serverKey, clientKey)
-        vouchNonce = decrypted[32:48]
         try:
-            vouchKey = longLongBox.decrypt(decrypted[48:96], 'CurveCPV' + vouchNonce)
+            vouchKey = longLongBox.decrypt(encryptedVouch, 'CurveCPV' + vouchNonce)
         except CryptoError:
             print 'bad vouch crypto'
             return
@@ -443,7 +451,7 @@ class CurveCPServerTransport(_CurveCPBaseTransport):
             return
         if self.clientKey is None:
             self.clientKey = clientKey
-            self.serverDomain = dnsToName(decrypted[96:352])
+            self.serverDomain = dnsToName(serverDomain)
             self.reschedule('message')
             self._peerEstablished()
             self.protocol.start(self.reactor, True)
@@ -457,7 +465,7 @@ class CurveCPServerTransport(_CurveCPBaseTransport):
     def datagram_message(self, data, host_port):
         if not self._verifyPacketStart(data):
             return
-        nonce = data[72:80]
+        nonce, = _clientMessageStruct.unpack_from(data)
         try:
             decrypted = self._shortShortBox.decrypt(data[80:], 'CurveCP-client-M' + nonce)
         except CryptoError:
