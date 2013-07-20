@@ -17,7 +17,7 @@ class CurveCPServerDispatcher(DatagramProtocol):
                 return
             print 'new transport', clientID.encode('hex')
             transport = self.transports[clientID] = CurveCPServerTransport(
-                self.reactor, self.serverKey, self.factory)
+                self.reactor, self.serverKey, self.factory, clientID)
             transport.transport = self.transport
 
         self.transports[clientID].datagramReceived(data, host_port)
