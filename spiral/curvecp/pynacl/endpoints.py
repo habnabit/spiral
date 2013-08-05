@@ -1,3 +1,5 @@
+from twisted.internet import defer
+
 from nacl.public import PrivateKey
 
 from spiral.curvecp.pynacl.server import CurveCPServerDispatcher
@@ -33,4 +35,4 @@ class CurveCPServerEndpoint(object):
 
     def listen(self, fac):
         dispatcher = CurveCPServerDispatcher(self.reactor, self.serverKey, fac)
-        return self.reactor.listenUDP(self.port, dispatcher)
+        return defer.succeed(self.reactor.listenUDP(self.port, dispatcher))
