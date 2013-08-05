@@ -454,7 +454,6 @@ class CurveCPServerTransport(_CurveCPBaseTransport):
             self.serverDomain = dnsToName(serverDomain)
             self.reschedule('message')
             self._peerEstablished()
-            self.protocol.start(self.reactor, True)
         elif self.clientKey != clientKey:
             print 'already got key'
             return
