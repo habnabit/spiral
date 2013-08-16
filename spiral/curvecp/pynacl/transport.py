@@ -2,6 +2,7 @@ from __future__ import division, absolute_import
 
 import bisect
 import collections
+import heapq
 import os
 import struct
 import time
@@ -32,21 +33,15 @@ _clientMessageStruct = struct.Struct('<8x16x16x32x8s')
 
 
 _QueuedDataBase = collections.namedtuple('_QueuedDataBase', [
-    'interval', 'lowerBound', 'deferreds', 'sentAt', 'data',
+    'interval', 'lowerBound', 'deferreds', 'sentAt', 'messageIDs', 'data',
 ])
 
 class QueuedData(_QueuedDataBase):
-    def nextTimeoutIn(self, now, chicago):
-        if not self.sentAt:
-            return chicago.rttTimeout
-        return max(self.sentAt[-1] + chicago.rttTimeout, 0)
-
     def __hash__(self):
         return id(self)
 
     def dataToSend(self):
-        dataPos = self.interval.lower_bound()
-        return dataPos, self.data, self.sentAt
+        return self.lowerBound, self.data, self.sentAt
 
 
 def showMessage(tag, message, sentAt=None):
@@ -63,13 +58,14 @@ class _CurveCPBaseTransport(DatagramProtocol):
         self._weAcked = IntervalSet()
         self._sent = IntervalSet()
         self._theyAcked = IntervalSet()
-        self.outbuffer = []
+        self.sentMessages = set()
         self.previousID = 0
         self.fragment = []
-        self.chicago = Chicago()
+        self.congestion = Chicago()
         self.sentMessageAt = {}
         self.delayedCalls = {}
         self.messageQueue = []
+        self.enqueuedMessages = set()
         self.deferred = defer.Deferred()
         self._nonce = 0
         self._theirLastNonce = 0
@@ -78,6 +74,7 @@ class _CurveCPBaseTransport(DatagramProtocol):
         self.theirStreamEnd = None
         self.doneSending = False
         self.doneReceiving = False
+        self.outstandingMessages = 0
         self.datafile = open('data.%d.csv' % (os.getpid(),), 'w')
 
     messageMap = {}
@@ -109,36 +106,32 @@ class _CurveCPBaseTransport(DatagramProtocol):
     def sendMessage(self, message):
         packet = self._serializeMessage(message)
         self.transport.write(packet, self.peerHost)
-        self.sentMessageAt[message.id] = self.chicago.lastSentAt = time.time()
+        if message.id:
+            self.sentMessageAt[message.id] = self.congestion.lastSentAt = time.time()
         self._weAcked.update(message.ranges)
-        print 'out', message.id, message.previousID
 
     def parseMessage(self, now, message):
         message = parseMessage(message)
         if message.resolution and self.theirStreamEnd is not None:
             self.theirStreamEnd = message.dataPos
             self.startedResolving = True
-        print 'in', message.id, message.previousID
 
         sentAt = self.sentMessageAt.pop(message.previousID, None)
         if sentAt is not None:
-            self.chicago.processDelta(now, now - sentAt)
-            self.chicago.writerow(now, self.datafile)
+            self.congestion.processDelta(now, now - sentAt)
+            self.congestion.writerow(now, self.datafile)
         if message.id:
-            self.previousID = message.id
-            self.enqueue()
+            self.sendAMessage(ack=message.id)
         self._theyAcked.update(message.ranges)
-        newbuffer = []
-        for qd in self.outbuffer:
+        for qd in list(self.sentMessages):
             if qd.interval & self._theyAcked:
                 qd.interval.difference_update(self._theyAcked)
                 if not qd.interval:
                     for d in qd.deferreds:
                         d.callback(now)
                     self.cancel(qd)
-                    continue
-            newbuffer.append(qd)
-        self.outbuffer = newbuffer
+                    self.outstandingMessages -= 1
+                    self.sentMessages.remove(qd)
         if not message.data:
             return
         i = halfOpen(message.dataPos, message.dataPos + len(message.data))
@@ -154,34 +147,41 @@ class _CurveCPBaseTransport(DatagramProtocol):
         self.protocol.dataReceived(newData)
         self.fragment = []
 
-    def sendAMessage(self):
+    def sendAMessage(self, ack=None):
         now = time.time()
         nextActionIn = None
         dataPos, data, sentAt = 0, '', None
-        messageID, previousID = self.counter, self.previousID
+        messageID, previousID = self.counter, 0
         resolution = None
-        if self.previousID:
+        if ack is not None:
             messageID = 0
-            self.previousID = 0
+            previousID = ack
         elif self.messageQueue:
-            qd = self.messageQueue.pop(0)
-            print 'queued', len(self.messageQueue)
+            _, _, qd = heapq.heappop(self.messageQueue)
+            self.enqueuedMessages.remove(qd)
             dataPos, data, sentAt = qd.dataToSend()
-            previousID = 0
             self.counter += 1
             now = time.time()
             if qd.sentAt:
-                self.chicago.timedOut(now)
+                self.congestion.timedOut(now)
+                self.sentMessageAt.pop(qd.messageIDs[-1], None)
+            elif self.congestion.window is not None and self.outstandingMessages > self.congestion.window:
+                self.enqueue(1, qd)
+                return
+            else:
+                self.outstandingMessages += 1
             qd.sentAt.append(now)
+            qd.messageIDs.append(messageID)
+            self.sentMessages.add(qd)
+            self.reschedule(qd)
         elif self.ourStreamEnd is not None:
             dataPos = self.ourStreamEnd
             resolution = self.ourResolution
             self.counter += 1
-        elif self.chicago.lastSentAt + 5 < now:
+        elif self.congestion.lastSentAt + 5 < now:
             self.counter += 1
             nextActionIn = 10
         else:
-            print "doing nothing, let's wait"
             return 60
 
         message = Message(
@@ -199,58 +199,61 @@ class _CurveCPBaseTransport(DatagramProtocol):
         now = time.time()
         if nextActionIn is None:
             if what == 'message':
-                nextActionIn = self.chicago.nextMessageIn(now)
+                nextActionIn = self.congestion.nextMessageIn(now)
             else:
-                nextActionIn = what.nextTimeoutIn(now, self.chicago)
-        print 'queueing', what, nextActionIn
+                nextActionIn = self.congestion.nextTimeoutIn(now, what)
         delayedCall = self.delayedCalls.get(what)
         if delayedCall is not None and delayedCall.active():
             delayedCall.reset(nextActionIn)
         else:
+            import random
+            r = random.random()
             self.delayedCalls[what] = self.reactor.callLater(
-                nextActionIn, self._scheduledAction, what)
+                nextActionIn, self._scheduledAction, what, r)
 
     def cancel(self, what):
         delayedCall = self.delayedCalls.pop(what, None)
         if delayedCall is not None and delayedCall.active():
             delayedCall.cancel()
 
-    def _scheduledAction(self, what):
+    def _scheduledAction(self, what, r):
         nextActionIn = None
         if what == 'message':
             nextActionIn = self.sendAMessage()
+            self.reschedule(what, nextActionIn=nextActionIn)
         else:
-            self.messageQueue.append(what)
-        self.reschedule(what, nextActionIn=nextActionIn)
+            self.sentMessages.remove(what)
+            if not what.interval:
+                import pdb; pdb.set_trace()
+            self.enqueue(0, what)
 
-    def enqueue(self, data=None):
+    def enqueue(self, priority, *data):
         self.reschedule('message')
-        if data is not None:
-            self.messageQueue.append(data)
+        for datum in data:
+            if datum not in self.enqueuedMessages and datum.interval:
+                heapq.heappush(self.messageQueue, (priority, datum.lowerBound, datum))
+                self.enqueuedMessages.add(datum)
 
     def write(self, data):
         if self.ourStreamEnd is not None or not data:
             return defer.succeed(None)
-        print 'writing', len(data),
-        ds = [defer.Deferred()]
+
+        d = defer.Deferred()
+        qds = []
+        lowerBound = self._sent.upper_bound() if self._sent else 0
         while data:
-            if self.outbuffer and len(self.outbuffer[-1].data) < 1024:
-                lastQD = self.outbuffer.pop()
-                data = lastQD.data + data
-                ds.extend(lastQD.deferreds)
-                lowerBound = lastQD.lowerBound
-            else:
-                lowerBound = self._sent.upper_bound() if self._sent else 0
+            ds = []
             queueableData = data[:1024]
             dataRange = halfOpen(lowerBound, lowerBound + len(queueableData))
             qd = QueuedData(
-                IntervalSet([dataRange]), lowerBound,
-                ds if len(data) <= 1024 else [], [], queueableData)
-            self.outbuffer.append(qd)
-            self.enqueue(qd)
+                IntervalSet([dataRange]), lowerBound, ds, [], [], queueableData)
             self._sent.add(dataRange)
+            lowerBound += len(queueableData)
             data = data[1024:]
-        return ds[0]
+            qds.append(qd)
+        ds.append(d)
+        self.enqueue(1, *qds)
+        return d
 
     def _peerEstablished(self):
         self.protocol = self.factory.buildProtocol(self.getPeer())
@@ -258,7 +261,6 @@ class _CurveCPBaseTransport(DatagramProtocol):
         self.deferred.callback(self.protocol)
 
     def loseConnection(self, success=True):
-        print 'ok bye'
         self.reschedule('message')
         self.ourStreamEnd = self._sent.upper_bound() if self._sent else 0
         self.ourResolution = 'success' if success else 'failure'

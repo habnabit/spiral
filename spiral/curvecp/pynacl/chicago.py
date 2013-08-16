@@ -16,6 +16,7 @@ class Chicago(object):
         self.rttLastPanic = 0
         self.secPerMessage = 0
         self.lastSentAt = 0
+        self.window = None
 
     def writerow(self, now, fobj):
         import csv
@@ -92,6 +93,13 @@ class Chicago(object):
 
     def nextMessageIn(self, now):
         return max(self.lastSentAt + self.secPerMessage - now, 0)
+
+    def nextTimeoutIn(self, now, qd):
+        if not qd.sentAt:
+            return self.rttTimeout
+        ret = now - qd.sentAt[-1] + self.rttTimeout
+        assert ret > 0
+        return ret
 
     def timedOut(self, now):
         if now > self.rttLastPanic + 4 * self.rttTimeout:
