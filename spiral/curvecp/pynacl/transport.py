@@ -33,16 +33,23 @@ _serverMessageStruct = struct.Struct('<8x16x16x8s')
 _clientMessageStruct = struct.Struct('<8x16x16x32x8s')
 
 
-_QueuedDataBase = collections.namedtuple('_QueuedDataBase', [
+_QueuedThingBase = collections.namedtuple('_QueuedThingBase', [
     'interval', 'lowerBound', 'deferreds', 'sentAt', 'messageIDs', 'data',
 ])
 
-class QueuedData(_QueuedDataBase):
+class QueuedData(_QueuedThingBase):
     def __hash__(self):
         return id(self)
 
-    def dataToSend(self):
-        return self.lowerBound, self.data, self.sentAt
+    def fillInMessage(self, message):
+        return message._replace(dataPos=self.lowerBound, data=self.data)
+
+class QueuedResolution(_QueuedThingBase):
+    def __hash__(self):
+        return id(self)
+
+    def fillInMessage(self, message):
+        return message._replace(dataPos=self.lowerBound, resolution=self.data)
 
 
 def showMessage(tag, message, sentAt=None):
@@ -75,8 +82,8 @@ class _CurveCPBaseTransport(DatagramProtocol):
         self.counter = 1
         self.ourStreamEnd = None
         self.theirStreamEnd = None
-        self.doneSending = False
-        self.doneReceiving = False
+        self.reads = self.writes = None
+        self.done = False
         self.outstandingMessages = 0
         self.datafile = open('data.%d.csv' % (os.getpid(),), 'w')
 
@@ -96,7 +103,7 @@ class _CurveCPBaseTransport(DatagramProtocol):
     messageMap = {}
     def datagramReceived(self, data, host_port):
         print 'got', len(data), 'from', host_port
-        if self.doneSending and self.doneReceiving:
+        if self.done:
             return
         handler = self.messageMap.get(data[:8])
         if not handler:
@@ -121,6 +128,7 @@ class _CurveCPBaseTransport(DatagramProtocol):
         return ''
 
     def sendMessage(self, message):
+        print 'out', message
         packet = self._serializeMessage(message)
         self._write(packet)
         if message.id:
@@ -129,9 +137,7 @@ class _CurveCPBaseTransport(DatagramProtocol):
 
     def parseMessage(self, now, message):
         message = parseMessage(message)
-        if message.resolution and self.theirStreamEnd is not None:
-            self.theirStreamEnd = message.dataPos
-            self.startedResolving = True
+        print 'in', message
 
         sentAt = self.sentMessageAt.pop(message.previousID, None)
         if sentAt is not None:
@@ -140,6 +146,7 @@ class _CurveCPBaseTransport(DatagramProtocol):
         if message.id:
             self.sendAMessage(ack=message.id)
         self._theyAcked.update(message.ranges)
+
         for qd in list(self.sentMessages):
             if qd.interval & self._theyAcked:
                 qd.interval.difference_update(self._theyAcked)
@@ -149,7 +156,14 @@ class _CurveCPBaseTransport(DatagramProtocol):
                     self.cancel(qd)
                     self.outstandingMessages -= 1
                     self.sentMessages.remove(qd)
-        if not message.data:
+
+        if message.resolution and self.theirStreamEnd is None:
+            self.theirStreamEnd = message.dataPos
+            self.theirResolution = message.resolution
+            self._received.add(halfOpen(message.dataPos, message.dataPos + 1))
+            self._checkTheirResolution()
+            return
+        elif not message.data:
             return
         i = halfOpen(message.dataPos, message.dataPos + len(message.data))
         new = IntervalSet([i]) - self._received
@@ -163,20 +177,40 @@ class _CurveCPBaseTransport(DatagramProtocol):
         newData = ''.join([d for _, d in self.fragment])
         self.protocol.dataReceived(newData)
         self.fragment = []
+        self._checkTheirResolution()
+
+    def _checkTheirResolution(self):
+        if self.theirStreamEnd is None:
+            return
+        if len(self._received) != 1 or self.theirStreamEnd not in self._received:
+            return
+        self.reads = 'closed'
+        print 'they are done'
+        self._checkBothResolutions()
+
+    def _checkBothResolutions(self):
+        if self.reads == self.writes == 'closed' and not self.done:
+            self.protocol.connectionLost(Failure(e.resolution_map[self.theirResolution]))
+            self.done = True
 
     def sendAMessage(self, ack=None):
         now = time.time()
         nextActionIn = None
-        dataPos, data, sentAt = 0, '', None
-        messageID, previousID = self.counter, 0
-        resolution = None
+        message = Message(
+            id=self.counter,
+            previousID=0,
+            ranges=list(self._received)[:6],
+            resolution=None,
+            dataPos=0,
+            data='',
+        )
+
         if ack is not None:
-            messageID = 0
-            previousID = ack
+            message = message._replace(id=0, previousID=ack)
         elif self.messageQueue:
             _, _, qd = heapq.heappop(self.messageQueue)
             self.enqueuedMessages.remove(qd)
-            dataPos, data, sentAt = qd.dataToSend()
+            message = qd.fillInMessage(message)
             self.counter += 1
             now = time.time()
             if qd.sentAt:
@@ -188,27 +222,15 @@ class _CurveCPBaseTransport(DatagramProtocol):
             else:
                 self.outstandingMessages += 1
             qd.sentAt.append(now)
-            qd.messageIDs.append(messageID)
+            qd.messageIDs.append(message.id)
             self.sentMessages.add(qd)
             self.reschedule(qd)
-        elif self.ourStreamEnd is not None:
-            dataPos = self.ourStreamEnd
-            resolution = self.ourResolution
-            self.counter += 1
         elif self.congestion.lastSentAt + 5 < now:
             self.counter += 1
             nextActionIn = 10
         else:
             return 60
 
-        message = Message(
-            messageID,
-            previousID,
-            list(self._received)[:6],
-            resolution,
-            dataPos,
-            data,
-        )
         self.sendMessage(message)
         return nextActionIn
 
@@ -251,8 +273,10 @@ class _CurveCPBaseTransport(DatagramProtocol):
                 self.enqueuedMessages.add(datum)
 
     def write(self, data):
-        if self.ourStreamEnd is not None or not data:
+        if not data:
             return defer.succeed(None)
+        elif self.writes in ('closing', 'closed'):
+            return defer.fail(e.CurveCPConnectionDone())
 
         d = defer.Deferred()
         qds = []
@@ -275,11 +299,25 @@ class _CurveCPBaseTransport(DatagramProtocol):
         self.protocol = self.factory.buildProtocol(self.getPeer())
         self.protocol.makeConnection(self)
         self.deferred.callback(self.protocol)
+        self.reads = 'open'
+        self.writes = 'open'
+
+    def _doneWritingAcked(self, when):
+        self.writes = 'closed'
+        print 'closed'
+        self._checkBothResolutions()
+        return when
 
     def loseConnection(self, success=True):
-        self.reschedule('message')
-        self.ourStreamEnd = self._sent.upper_bound() if self._sent else 0
-        self.ourResolution = 'success' if success else 'failure'
+        d = defer.Deferred()
+        d.addCallback(self._doneWritingAcked)
+        streamEnd = self.ourStreamEnd = self._sent.upper_bound() if self._sent else 0
+        resolution = self.ourResolution = 'success' if success else 'failure'
+        interval = IntervalSet([halfOpen(streamEnd, streamEnd + 1)])
+        self.enqueue(1, QueuedResolution(interval, streamEnd, [d], [], [], resolution))
+        self.writes = 'closing'
+        print 'closing'
+        return d
 
 
 class CurveCPClientTransport(_CurveCPBaseTransport):

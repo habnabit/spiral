@@ -3,3 +3,9 @@ class CurveCPConnectionDone(Exception):
 
 class CurveCPConnectionFailed(CurveCPConnectionDone):
     pass
+
+
+resolution_map = {
+    'success': CurveCPConnectionDone,
+    'failure': CurveCPConnectionFailed,
+}
