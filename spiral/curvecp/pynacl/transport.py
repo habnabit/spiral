@@ -20,6 +20,7 @@ from spiral.curvecp.util import nameToDNS, dnsToName
 from spiral.curvecp.pynacl.chicago import Chicago
 from spiral.curvecp.pynacl.interval import halfOpen
 from spiral.curvecp.pynacl.message import Message, parseMessage
+from spiral.util import MultiTimeout
 
 
 _nonceStruct = struct.Struct('<Q')
@@ -50,6 +51,8 @@ def showMessage(tag, message, sentAt=None):
     print len(message.data), sentAt and len(sentAt)
 
 class _CurveCPBaseTransport(DatagramProtocol):
+    timeouts = 1, 1, 2, 3, 5, 8, 13
+
     def __init__(self, reactor, serverKey, factory):
         self.reactor = reactor
         self.serverKey = serverKey
@@ -77,8 +80,22 @@ class _CurveCPBaseTransport(DatagramProtocol):
         self.outstandingMessages = 0
         self.datafile = open('data.%d.csv' % (os.getpid(),), 'w')
 
+    def _timedOutHandshaking(self):
+        print 'timed out'
+
+    def _write(self, data):
+        print 'wrote', len(data), 'to', self.peerHost
+        self.transport.write(data, self.peerHost)
+
+    def _retrySendingForHandshake(self, data):
+        mt = MultiTimeout(
+            self.reactor, self.timeouts, self._timedOutHandshaking, self._write, data)
+        mt.reset()
+        return mt
+
     messageMap = {}
     def datagramReceived(self, data, host_port):
+        print 'got', len(data), 'from', host_port
         if self.doneSending and self.doneReceiving:
             return
         handler = self.messageMap.get(data[:8])
@@ -105,7 +122,7 @@ class _CurveCPBaseTransport(DatagramProtocol):
 
     def sendMessage(self, message):
         packet = self._serializeMessage(message)
-        self.transport.write(packet, self.peerHost)
+        self._write(packet)
         if message.id:
             self.sentMessageAt[message.id] = self.congestion.lastSentAt = time.time()
         self._weAcked.update(message.ranges)
@@ -223,9 +240,8 @@ class _CurveCPBaseTransport(DatagramProtocol):
             self.reschedule(what, nextActionIn=nextActionIn)
         else:
             self.sentMessages.remove(what)
-            if not what.interval:
-                import pdb; pdb.set_trace()
-            self.enqueue(0, what)
+            if what.interval:
+                self.enqueue(0, what)
 
     def enqueue(self, priority, *data):
         self.reschedule('message')
@@ -277,7 +293,7 @@ class CurveCPClientTransport(_CurveCPBaseTransport):
             clientKey = PrivateKey.generate()
         self.clientKey = clientKey
         self.clientExtension = clientExtension
-        self._cookie = None
+        self.awaiting = 'cookie'
 
     messageMap = {
         'RL3aNMXK': 'cookie',
@@ -303,7 +319,7 @@ class CurveCPClientTransport(_CurveCPBaseTransport):
             + str(self._clientShortKey.public_key)
             + '\0' * 64
             + self._encryptForNonce('H', self._shortLongBox, '\0' * 64))
-        self.transport.write(packet, self.peerHost)
+        self.helloMultiCall = self._retrySendingForHandshake(packet)
 
     def _verifyPacketStart(self, data):
         return (data[8:24] == self.clientExtension
@@ -321,12 +337,15 @@ class CurveCPClientTransport(_CurveCPBaseTransport):
             return
         serverShortKeyString, cookie = _cookieInnerStruct.unpack(decrypted)
         serverShortKey = PublicKey(serverShortKeyString)
-        if self._cookie is None:
+        if self.awaiting != 'cookie' and (cookie != self._cookie or serverShortKey != self._serverShortKey):
+            print 'already got cookie'
+            return
+
+        self.peerHost = host_port
+        if self.awaiting == 'cookie':
             self._cookie = cookie
             self._serverShortKey = serverShortKey
             self._shortShortBox = Box(self._clientShortKey, self._serverShortKey)
-            self.reschedule('message')
-            self._peerEstablished()
             message = '\0' * 192
             longLongNonce = os.urandom(16)
             longLongBox = Box(self.clientKey, self.serverKey)
@@ -336,20 +355,22 @@ class CurveCPClientTransport(_CurveCPBaseTransport):
                 + longLongBox.encrypt(str(self._clientShortKey.public_key), 'CurveCPV' + longLongNonce).ciphertext
                 + nameToDNS(self.serverDomain)
                 + message)
-            self.initiatePacket = (
+            initiatePacket = (
                 'QvnQ5XlI'
                 + self.serverExtension
                 + self.clientExtension
                 + str(self._clientShortKey.public_key)
                 + self._cookie
                 + self._encryptForNonce('I', self._shortShortBox, initiatePacketContent))
-        elif cookie != self._cookie or serverShortKey != self._serverShortKey:
-            print 'already got cookie'
-            return
-        self.peerHost = host_port
-        self.transport.write(self.initiatePacket, self.peerHost)
+            self.helloMultiCall.cancel()
+            self.initiateMultiCall = self._retrySendingForHandshake(initiatePacket)
+            self.awaiting = 'first-message'
+        else:
+            self.initiateMultiCall.reset()
 
     def datagram_message(self, data, host_port):
+        if self.awaiting not in ('first-message', 'message'):
+            return
         if not self._verifyPacketStart(data):
             print 'bad message'
             return
@@ -362,6 +383,13 @@ class CurveCPClientTransport(_CurveCPBaseTransport):
         if not self._verifyNonce(nonce):
             print 'bad nonce'
             return
+        if self.awaiting == 'first-message':
+            self.initiateMultiCall.cancel()
+            del self.initiateMultiCall
+            del self.helloMultiCall
+            self.awaiting = 'message'
+            self.reschedule('message')
+            self._peerEstablished()
         self.parseMessage(time.time(), decrypted)
 
     def getHost(self):
@@ -387,6 +415,7 @@ class CurveCPServerTransport(_CurveCPBaseTransport):
         self._longShortBox = Box(self.serverKey, self._clientShortKey)
         self._shortShortBox = Box(self._serverShortKey, self._clientShortKey)
         self.cookiePacket = None
+        self.awaiting = 'hello'
 
     messageMap = {
         'QvnQ5XlH': 'hello',
@@ -408,6 +437,8 @@ class CurveCPServerTransport(_CurveCPBaseTransport):
                 and data[40:72] == str(self._clientShortKey))
 
     def datagram_hello(self, data, host_port):
+        if self.awaiting not in ('hello', 'initiate'):
+            return
         if len(data) != _helloStruct.size or not self._verifyPacketStart(data):
             print 'bad hello'
             return
@@ -417,20 +448,25 @@ class CurveCPServerTransport(_CurveCPBaseTransport):
         except CryptoError:
             print 'bad hello crypto'
             return
-        if self.cookiePacket is None:
+        self.peerHost = host_port
+        if self.awaiting == 'hello':
             self.cookie = os.urandom(96)
             boxData = str(self._serverShortKey.public_key) + self.cookie
             cookieNonce = os.urandom(16)
-            self.cookiePacket = (
+            cookiePacket = (
                 'RL3aNMXK'
                 + self.serverExtension
                 + self.clientExtension
                 + cookieNonce
                 + self._longShortBox.encrypt(boxData, 'CurveCPK' + cookieNonce).ciphertext)
-        self.peerHost = host_port
-        self.transport.write(self.cookiePacket, self.peerHost)
+            self.cookieMultiCall = self._retrySendingForHandshake(cookiePacket)
+            self.awaiting = 'initiate'
+        else:
+            self.cookieMultiCall.reset()
 
     def datagram_initiate(self, data, host_port):
+        if self.awaiting not in ('initiate', 'message'):
+            return
         cookie, nonce = _initiateStruct.unpack_from(data)
         if cookie != self.cookie or not self._verifyPacketStart(data):
             print 'bad initiate'
