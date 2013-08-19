@@ -151,3 +151,9 @@ def test_ack(messageTransport):
     t.parseMessage(t.now(), Message(1, 0, [], None, 0, 'hi').pack())
     t.clock.advance(0)
     assert t.sendMessage.captured[0] == Message(0, 1, [halfOpen(0, 2)], None, 0, '')
+
+def test_sendingData(messageTransport):
+    t = messageTransport
+    t.write('hi')
+    t.clock.advance(0)
+    assert t.sendMessage.captured[0] == Message(1, 0, [], None, 0, 'hi')
