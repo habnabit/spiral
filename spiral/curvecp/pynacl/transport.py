@@ -59,9 +59,10 @@ def showMessage(tag, message, sentAt=None):
 
 class _CurveCPBaseTransport(DatagramProtocol):
     timeouts = 1, 1, 2, 3, 5, 8, 13
+    now = staticmethod(time.time)
 
-    def __init__(self, reactor, serverKey, factory):
-        self.reactor = reactor
+    def __init__(self, clock, serverKey, factory):
+        self.clock = clock
         self.serverKey = serverKey
         self.factory = factory
         self._received = IntervalSet()
@@ -96,7 +97,7 @@ class _CurveCPBaseTransport(DatagramProtocol):
 
     def _retrySendingForHandshake(self, data):
         mt = MultiTimeout(
-            self.reactor, self.timeouts, self._timedOutHandshaking, self._write, data)
+            self.clock, self.timeouts, self._timedOutHandshaking, self._write, data)
         mt.reset()
         return mt
 
@@ -132,7 +133,7 @@ class _CurveCPBaseTransport(DatagramProtocol):
         packet = self._serializeMessage(message)
         self._write(packet)
         if message.id:
-            self.sentMessageAt[message.id] = self.congestion.lastSentAt = time.time()
+            self.sentMessageAt[message.id] = self.congestion.lastSentAt = self.now()
         self._weAcked.update(message.ranges)
 
     def parseMessage(self, now, message):
@@ -194,14 +195,14 @@ class _CurveCPBaseTransport(DatagramProtocol):
         if self.reads == self.writes == 'closed' and not self.done:
             self.protocol.connectionLost(Failure(e.resolution_map[self.theirResolution]))
             self.cancel('message')
-            self.reactor.callLater(sum(self.timeouts), self._completelyDone)
+            self.clock.callLater(sum(self.timeouts), self._completelyDone)
 
     def _completelyDone(self):
         print 'completely done'
         self.done = True
 
     def sendAMessage(self, ack=None):
-        now = time.time()
+        now = self.now()
         nextActionIn = None
         message = Message(
             id=self.counter,
@@ -219,7 +220,7 @@ class _CurveCPBaseTransport(DatagramProtocol):
             self.enqueuedMessages.remove(qd)
             message = qd.fillInMessage(message)
             self.counter += 1
-            now = time.time()
+            now = self.now()
             if qd.sentAt:
                 self.congestion.timedOut(now)
                 self.sentMessageAt.pop(qd.messageIDs[-1], None)
@@ -242,7 +243,7 @@ class _CurveCPBaseTransport(DatagramProtocol):
         return nextActionIn
 
     def reschedule(self, what, nextActionIn=None):
-        now = time.time()
+        now = self.now()
         if nextActionIn is None:
             if what == 'message':
                 nextActionIn = self.congestion.nextMessageIn(now)
@@ -252,7 +253,7 @@ class _CurveCPBaseTransport(DatagramProtocol):
         if delayedCall is not None and delayedCall.active():
             delayedCall.reset(nextActionIn)
         else:
-            self.delayedCalls[what] = self.reactor.callLater(
+            self.delayedCalls[what] = self.clock.callLater(
                 nextActionIn, self._scheduledAction, what)
 
     def cancel(self, what):
@@ -326,9 +327,9 @@ class _CurveCPBaseTransport(DatagramProtocol):
 
 
 class CurveCPClientTransport(_CurveCPBaseTransport):
-    def __init__(self, reactor, serverKey, factory, host, port,
+    def __init__(self, clock, serverKey, factory, host, port,
                  serverExtension, clientKey=None, clientExtension='\x00' * 16):
-        _CurveCPBaseTransport.__init__(self, reactor, serverKey, factory)
+        _CurveCPBaseTransport.__init__(self, clock, serverKey, factory)
         self.peerHost = host, port
         self.serverDomain = host
         self.serverExtension = serverExtension
@@ -433,7 +434,7 @@ class CurveCPClientTransport(_CurveCPBaseTransport):
             self.awaiting = 'message'
             self.reschedule('message')
             self._peerEstablished()
-        self.parseMessage(time.time(), decrypted)
+        self.parseMessage(self.now(), decrypted)
 
     def getHost(self):
         host = self.transport.getHost()
@@ -448,8 +449,8 @@ class CurveCPClientTransport(_CurveCPBaseTransport):
 
 
 class CurveCPServerTransport(_CurveCPBaseTransport):
-    def __init__(self, reactor, serverKey, factory, clientID):
-        _CurveCPBaseTransport.__init__(self, reactor, serverKey, factory)
+    def __init__(self, clock, serverKey, factory, clientID):
+        _CurveCPBaseTransport.__init__(self, clock, serverKey, factory)
         self.serverExtension = clientID[:16]
         self.clientExtension = clientID[16:32]
         self.clientKey = None
@@ -540,7 +541,7 @@ class CurveCPServerTransport(_CurveCPBaseTransport):
             return
         self.peerHost = host_port
         message = decrypted[352:]
-        self.parseMessage(time.time(), message)
+        self.parseMessage(self.now(), message)
         if self.awaiting == 'initiate':
             self.cookieMultiCall.cancel()
             del self.cookieMultiCall
@@ -557,7 +558,7 @@ class CurveCPServerTransport(_CurveCPBaseTransport):
         if not self._verifyNonce(nonce):
             return
         self.peerHost = host_port
-        self.parseMessage(time.time(), decrypted)
+        self.parseMessage(self.now(), decrypted)
 
     def getHost(self):
         host = self.transport.getHost()
