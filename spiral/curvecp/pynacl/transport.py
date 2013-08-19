@@ -184,7 +184,7 @@ class _CurveCPBaseTransport(DatagramProtocol):
     def _checkTheirResolution(self):
         if self.theirStreamEnd is None:
             return
-        if len(self._received) != 1 or self.theirStreamEnd not in self._received:
+        if len(self._received) != 1:
             return
         self.reads = 'closed'
         print 'they are done'
