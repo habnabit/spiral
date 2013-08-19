@@ -245,17 +245,15 @@ class _CurveCPBaseTransport(DatagramProtocol):
         if delayedCall is not None and delayedCall.active():
             delayedCall.reset(nextActionIn)
         else:
-            import random
-            r = random.random()
             self.delayedCalls[what] = self.reactor.callLater(
-                nextActionIn, self._scheduledAction, what, r)
+                nextActionIn, self._scheduledAction, what)
 
     def cancel(self, what):
         delayedCall = self.delayedCalls.pop(what, None)
         if delayedCall is not None and delayedCall.active():
             delayedCall.cancel()
 
-    def _scheduledAction(self, what, r):
+    def _scheduledAction(self, what):
         nextActionIn = None
         if what == 'message':
             nextActionIn = self.sendAMessage()
