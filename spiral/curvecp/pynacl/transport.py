@@ -161,6 +161,8 @@ class _CurveCPBaseTransport(DatagramProtocol):
             self.theirStreamEnd = message.dataPos
             self.theirResolution = message.resolution
             self._received.add(halfOpen(message.dataPos, message.dataPos + 1))
+            print 'got resolution', self._received
+            self.reads = 'closing'
             self._checkTheirResolution()
             return
         elif not message.data:
