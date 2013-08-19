@@ -1,12 +1,14 @@
 from nacl.public import PrivateKey
 import pytest
-from twisted.internet.protocol import Factory, Protocol
+from twisted.internet import defer
+from twisted.internet.protocol import Factory
 from twisted.internet.task import Clock
-from twisted.test.proto_helpers import FakeDatagramTransport
+from twisted.test.proto_helpers import AccumulatingProtocol, FakeDatagramTransport
 
 from spiral.curvecp.pynacl import transport
 from spiral.curvecp.pynacl.interval import halfOpen
 from spiral.curvecp.pynacl.message import Message
+from spiral.curvecp.pynacl.test.util import runUntilNext
 
 
 clientLongKey = PrivateKey('67c08747363633d2e3f8c00e3d67822ece85714015131dac10e88ae09dab523e'.decode('hex'))
@@ -20,13 +22,6 @@ serverExtension = '\2' * 16
 serverHostPort = '0.0.0.0', 1234
 
 
-class FakeProtocol(Protocol):
-    pass
-
-fakeFactory = Factory()
-fakeFactory.protocol = FakeProtocol
-
-
 def finishTransport(clock, t, key):
     t.generateKey = lambda: key
     t.now = clock.seconds
@@ -35,18 +30,25 @@ def finishTransport(clock, t, key):
     return t
 
 @pytest.fixture
-def clientTransport():
+def accumulatingFactory():
+    fac = Factory()
+    fac.protocol = AccumulatingProtocol
+    fac.protocolConnectionMade = defer.Deferred()
+    return fac
+
+@pytest.fixture
+def clientTransport(accumulatingFactory):
     clock = Clock()
     t = transport.CurveCPClientTransport(
-        clock, serverLongKey.public_key, fakeFactory,
+        clock, serverLongKey.public_key, accumulatingFactory,
         '0.0.0.0', 1234, serverExtension, clientLongKey, clientExtension)
     return finishTransport(clock, t, clientShortKey)
 
 @pytest.fixture
-def serverTransport():
+def serverTransport(accumulatingFactory):
     clock = Clock()
     t = transport.CurveCPServerTransport(
-        clock, serverLongKey, fakeFactory,
+        clock, serverLongKey, accumulatingFactory,
         serverExtension + clientExtension + str(clientShortKey.public_key))
     return finishTransport(clock, t, serverShortKey)
 
@@ -149,11 +151,86 @@ def messageTransport(clientMessageTransport, serverMessageTransport, request):
 def test_ack(messageTransport):
     t = messageTransport
     t.parseMessage(t.now(), Message(1, 0, [], None, 0, 'hi').pack())
-    t.clock.advance(0)
+    runUntilNext(t.clock)
     assert t.sendMessage.captured[0] == Message(0, 1, [halfOpen(0, 2)], None, 0, '')
 
 def test_sendingData(messageTransport):
     t = messageTransport
     t.write('hi')
-    t.clock.advance(0)
+    runUntilNext(t.clock)
     assert t.sendMessage.captured[0] == Message(1, 0, [], None, 0, 'hi')
+
+def test_writeDeferredFires(messageTransport):
+    t = messageTransport
+    d = t.write('hi')
+    fired = []
+    d.addCallback(fired.append)
+    assert not fired
+    runUntilNext(t.clock)
+    t.parseMessage(t.now(), Message(0, 1, [halfOpen(0, 2)], None, 0, '').pack())
+    assert fired[0] == t.now()
+
+def test_writeDeferredFiresSendingLotsOfData(messageTransport):
+    t = messageTransport
+    d = t.write('hi' * 1023)
+    fired = []
+    d.addCallback(fired.append)
+    assert not fired
+    runUntilNext(t.clock)
+    t.parseMessage(t.now(), Message(0, 1, [halfOpen(0, 2)], None, 0, '').pack())
+    assert not fired
+    t.parseMessage(t.now(), Message(0, 1, [halfOpen(0, 1024)], None, 0, '').pack())
+    assert not fired
+    t.parseMessage(t.now(), Message(0, 1, [halfOpen(0, 2045)], None, 0, '').pack())
+    assert not fired
+    t.parseMessage(t.now(), Message(0, 1, [halfOpen(0, 2046)], None, 0, '').pack())
+    assert fired[0] == t.now()
+
+def test_closeDeferredFires(messageTransport):
+    t = messageTransport
+    d = t.loseConnection()
+    fired = []
+    d.addCallback(fired.append)
+    assert not fired
+    runUntilNext(t.clock)
+    t.parseMessage(t.now(), Message(0, 1, [halfOpen(0, 1)], None, 0, '').pack())
+    assert fired[0] == t.now()
+
+def test_closeDeferredFiresAfterSendingData(messageTransport):
+    t = messageTransport
+    t.write('hello')
+    t.write('world')
+    d = t.loseConnection()
+    fired = []
+    d.addCallback(fired.append)
+    assert not fired
+    runUntilNext(t.clock)
+    t.parseMessage(t.now(), Message(0, 1, [halfOpen(0, 1)], None, 0, '').pack())
+    assert not fired
+    t.parseMessage(t.now(), Message(0, 1, [halfOpen(0, 6)], None, 0, '').pack())
+    assert not fired
+    t.parseMessage(t.now(), Message(0, 1, [halfOpen(0, 11)], None, 0, '').pack())
+    assert fired[0] == t.now()
+
+def test_receivingData(messageTransport):
+    t = messageTransport
+    t.parseMessage(t.now(), Message(1, 0, [], None, 0, 'hi').pack())
+    assert t.protocol.data == 'hi'
+
+def test_receivingFragmentedData(messageTransport):
+    t = messageTransport
+    t.parseMessage(t.now(), Message(3, 0, [], None, 6, '111').pack())
+    assert t.protocol.data == ''
+    t.parseMessage(t.now(), Message(2, 0, [], None, 3, '222').pack())
+    assert t.protocol.data == ''
+    t.parseMessage(t.now(), Message(1, 0, [], None, 0, '333').pack())
+    assert t.protocol.data == '333222111'
+
+def test_receivingOverlappingFragmentedData(messageTransport):
+    t = messageTransport
+    t.parseMessage(t.now(), Message(3, 0, [], None, 5, '2111').pack())
+    assert t.protocol.data == ''
+    t.parseMessage(t.now(), Message(2, 0, [], None, 2, '32221').pack())
+    assert t.protocol.data == ''
+    t.parseMessage(t.now(), Message(1, 0, [], None, 0, '3332').pack())
+    assert t.protocol.data == '333222111'
