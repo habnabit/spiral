@@ -536,6 +536,10 @@ class CurveCPServerTransport(_CurveCPBaseTransport):
         self.peerHost = host_port
         message = decrypted[352:]
         self.parseMessage(time.time(), message)
+        if self.awaiting == 'initiate':
+            self.cookieMultiCall.cancel()
+            del self.cookieMultiCall
+            self.awaiting = 'message'
 
     def datagram_message(self, data, host_port):
         if not self._verifyPacketStart(data):
