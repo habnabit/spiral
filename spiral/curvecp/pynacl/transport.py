@@ -193,7 +193,12 @@ class _CurveCPBaseTransport(DatagramProtocol):
     def _checkBothResolutions(self):
         if self.reads == self.writes == 'closed' and not self.done:
             self.protocol.connectionLost(Failure(e.resolution_map[self.theirResolution]))
-            self.done = True
+            self.cancel('message')
+            self.reactor.callLater(sum(self.timeouts), self._completelyDone)
+
+    def _completelyDone(self):
+        print 'completely done'
+        self.done = True
 
     def sendAMessage(self, ack=None):
         now = time.time()
