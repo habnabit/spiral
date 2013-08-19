@@ -60,6 +60,8 @@ def showMessage(tag, message, sentAt=None):
 class _CurveCPBaseTransport(DatagramProtocol):
     timeouts = 1, 1, 2, 3, 5, 8, 13
     now = staticmethod(time.time)
+    generateKey = staticmethod(PrivateKey.generate)
+    urandom = staticmethod(os.urandom)
 
     def __init__(self, clock, serverKey, factory):
         self.clock = clock
@@ -145,7 +147,7 @@ class _CurveCPBaseTransport(DatagramProtocol):
             self.congestion.processDelta(now, now - sentAt)
             self.congestion.writerow(now, self.datafile)
         if message.id:
-            self.sendAMessage(ack=message.id)
+            self.clock.callLater(0, self.sendAMessage, ack=message.id)
         self._theyAcked.update(message.ranges)
 
         for qd in list(self.sentMessages):
@@ -334,7 +336,7 @@ class CurveCPClientTransport(_CurveCPBaseTransport):
         self.serverDomain = host
         self.serverExtension = serverExtension
         if clientKey is None:
-            clientKey = PrivateKey.generate()
+            clientKey = self.generateKey()
         self.clientKey = clientKey
         self.clientExtension = clientExtension
         self.awaiting = 'cookie'
@@ -354,7 +356,7 @@ class CurveCPClientTransport(_CurveCPBaseTransport):
             + self._encryptForNonce('M', self._shortShortBox, message.pack()))
 
     def startProtocol(self):
-        self._clientShortKey = PrivateKey.generate()
+        self._clientShortKey = self.generateKey()
         self._shortLongBox = Box(self._clientShortKey, self.serverKey)
         packet = (
             'QvnQ5XlH'
@@ -391,7 +393,7 @@ class CurveCPClientTransport(_CurveCPBaseTransport):
             self._serverShortKey = serverShortKey
             self._shortShortBox = Box(self._clientShortKey, self._serverShortKey)
             message = '\0' * 192
-            longLongNonce = os.urandom(16)
+            longLongNonce = self.urandom(16)
             longLongBox = Box(self.clientKey, self.serverKey)
             initiatePacketContent = (
                 str(self.clientKey.public_key)
@@ -455,9 +457,6 @@ class CurveCPServerTransport(_CurveCPBaseTransport):
         self.clientExtension = clientID[16:32]
         self.clientKey = None
         self._clientShortKey = PublicKey(clientID[32:64])
-        self._serverShortKey = PrivateKey.generate()
-        self._longShortBox = Box(self.serverKey, self._clientShortKey)
-        self._shortShortBox = Box(self._serverShortKey, self._clientShortKey)
         self.cookiePacket = None
         self.awaiting = 'hello'
 
@@ -467,6 +466,11 @@ class CurveCPServerTransport(_CurveCPBaseTransport):
         'QvnQ5XlM': 'message',
     }
     _nonceInfix = 'server'
+
+    def startProtocol(self):
+        self._serverShortKey = self.generateKey()
+        self._longShortBox = Box(self.serverKey, self._clientShortKey)
+        self._shortShortBox = Box(self._serverShortKey, self._clientShortKey)
 
     def _serializeMessage(self, message):
         return (
@@ -494,13 +498,13 @@ class CurveCPServerTransport(_CurveCPBaseTransport):
             return
         self.peerHost = host_port
         if self.awaiting == 'hello':
-            self.cookie = os.urandom(96)
+            self.cookie = self.urandom(96)
             boxData = str(self._serverShortKey.public_key) + self.cookie
-            cookieNonce = os.urandom(16)
+            cookieNonce = self.urandom(16)
             cookiePacket = (
                 'RL3aNMXK'
-                + self.serverExtension
                 + self.clientExtension
+                + self.serverExtension
                 + cookieNonce
                 + self._longShortBox.encrypt(boxData, 'CurveCPK' + cookieNonce).ciphertext)
             self.cookieMultiCall = self._retrySendingForHandshake(cookiePacket)
