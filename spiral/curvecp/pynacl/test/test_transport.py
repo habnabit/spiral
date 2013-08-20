@@ -8,7 +8,7 @@ from twisted.test.proto_helpers import AccumulatingProtocol, FakeDatagramTranspo
 from spiral.curvecp.pynacl import transport
 from spiral.curvecp.pynacl.interval import halfOpen
 from spiral.curvecp.pynacl.message import Message
-from spiral.curvecp.pynacl.test.util import runUntilNext, nextCallTime
+from spiral.curvecp.pynacl.test.util import runUntilNext, nextCallIn
 
 
 clientLongKey = PrivateKey('67c08747363633d2e3f8c00e3d67822ece85714015131dac10e88ae09dab523e'.decode('hex'))
@@ -122,6 +122,34 @@ gaX0xIRYRf2fmU8bfnAQETLazr2qeEKCFLbDfYAM4Ti0Eg3PFyjzB36P3dOION+X7me+ce6qy0NP
 XnGYX/kcxwlJaoCF81JnVAlxM8bp+4Ng+nv/Up1F6KagLRtrvMZ3ZYuf27eubqpSrKDEdvMOF7U4
 TsC59BiRR6sdDoc2Pt5m7eJ5rl8c1XyA90Ir/toUjO5hF7xmBQ==""".decode('base64'))
 
+class FakeCongestion(object):
+    def __init__(self):
+        self.rtts = []
+        self.timeouts = []
+        self.window = None
+        self.lastSentAt = None
+        self.secPerMessage = 1
+
+    def writerow(self, now, fobj):
+        pass
+
+    def processDelta(self, now, rtt):
+        self.rtts.append(rtt)
+
+    def timedOut(self, now):
+        self.timeouts.append(now)
+
+    def nextMessageIn(self, now):
+        return max((self.lastSentAt or now) + self.secPerMessage - now, 0)
+
+    def nextTimeoutIn(self, now, qd):
+        if not qd.sentAt:
+            return self.secPerMessage * 10
+        ret = now - qd.sentAt[-1] + self.secPerMessage * 10
+        assert ret > 0
+        return ret
+
+
 def captureMessages(t):
     _sendMessage = t.sendMessage
     def capture(message):
@@ -133,12 +161,14 @@ def captureMessages(t):
 
 @pytest.fixture
 def clientMessageTransport(clientTransport):
+    clientTransport.congestion = FakeCongestion()
     clientTransport.datagramReceived(serverCookie, serverHostPort)
     clientTransport.datagramReceived(serverNullMessage, serverHostPort)
     return captureMessages(clientTransport)
 
 @pytest.fixture
 def serverMessageTransport(serverTransport):
+    serverTransport.congestion = FakeCongestion()
     serverTransport.datagramReceived(clientHello, clientHostPort)
     serverTransport.datagramReceived(clientInitiate, clientHostPort)
     return captureMessages(serverTransport)
@@ -176,7 +206,7 @@ def test_writeDeferredFiresSendingLotsOfData(messageTransport):
     fired = []
     d.addCallback(fired.append)
     assert not fired
-    runUntilNext(t.clock)
+    t.clock.pump([1, 1])
     t.parseMessage(t.now(), Message(0, 1, [halfOpen(0, 2)], None, 0, '').pack())
     assert not fired
     t.parseMessage(t.now(), Message(0, 1, [halfOpen(0, 1024)], None, 0, '').pack())
@@ -192,7 +222,7 @@ def test_closeDeferredFires(messageTransport):
     fired = []
     d.addCallback(fired.append)
     assert not fired
-    runUntilNext(t.clock)
+    t.clock.advance(1)
     t.parseMessage(t.now(), Message(0, 1, [halfOpen(0, 1)], None, 0, '').pack())
     assert fired[0] == t.now()
 
@@ -204,7 +234,7 @@ def test_closeDeferredFiresAfterSendingData(messageTransport):
     fired = []
     d.addCallback(fired.append)
     assert not fired
-    runUntilNext(t.clock)
+    t.clock.pump([1, 1, 1])
     t.parseMessage(t.now(), Message(0, 1, [halfOpen(0, 1)], None, 0, '').pack())
     assert not fired
     t.parseMessage(t.now(), Message(0, 1, [halfOpen(0, 6)], None, 0, '').pack())
@@ -237,14 +267,15 @@ def test_receivingOverlappingFragmentedData(messageTransport):
 
 def test_emptyMessageQueueWaitsForAWhile(messageTransport):
     t = messageTransport
-    t.clock.advance(0)
-    assert nextCallTime(t.clock) == 60
+    t.clock.advance(1)
+    assert nextCallIn(t.clock) == 60
 
 def test_emptyingTheMessageQueueWaitsForAWhile(messageTransport):
     t = messageTransport
     t.write('hi')
-    t.clock.advance(0)
-    assert len(t.sendMessage.captured) == 1
-    assert nextCallTime(t.clock) != 60
+    t.clock.pump([1, 10])
+    assert len(t.sendMessage.captured) == 2
     t.parseMessage(t.now(), Message(0, 1, [halfOpen(0, 2)], None, 0, '').pack())
-    assert nextCallTime(t.clock) == 60
+    t.clock.advance(10)
+    assert len(t.sendMessage.captured) == 2
+    assert nextCallIn(t.clock) == 60
