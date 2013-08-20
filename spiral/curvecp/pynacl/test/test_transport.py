@@ -8,7 +8,7 @@ from twisted.test.proto_helpers import AccumulatingProtocol, FakeDatagramTranspo
 from spiral.curvecp.pynacl import transport
 from spiral.curvecp.pynacl.interval import halfOpen
 from spiral.curvecp.pynacl.message import Message
-from spiral.curvecp.pynacl.test.util import runUntilNext
+from spiral.curvecp.pynacl.test.util import runUntilNext, nextCallTime
 
 
 clientLongKey = PrivateKey('67c08747363633d2e3f8c00e3d67822ece85714015131dac10e88ae09dab523e'.decode('hex'))
@@ -234,3 +234,17 @@ def test_receivingOverlappingFragmentedData(messageTransport):
     assert t.protocol.data == ''
     t.parseMessage(t.now(), Message(1, 0, [], None, 0, '3332').pack())
     assert t.protocol.data == '333222111'
+
+def test_emptyMessageQueueWaitsForAWhile(messageTransport):
+    t = messageTransport
+    t.clock.advance(0)
+    assert nextCallTime(t.clock) == 60
+
+def test_emptyingTheMessageQueueWaitsForAWhile(messageTransport):
+    t = messageTransport
+    t.write('hi')
+    t.clock.advance(0)
+    assert len(t.sendMessage.captured) == 1
+    assert nextCallTime(t.clock) != 60
+    t.parseMessage(t.now(), Message(0, 1, [halfOpen(0, 2)], None, 0, '').pack())
+    assert nextCallTime(t.clock) == 60

@@ -235,9 +235,6 @@ class _CurveCPBaseTransport(DatagramProtocol):
             qd.messageIDs.append(message.id)
             self.sentMessages.add(qd)
             self.reschedule(qd)
-        elif self.congestion.lastSentAt + 5 < now:
-            self.counter += 1
-            nextActionIn = 10
         else:
             return 60
 
