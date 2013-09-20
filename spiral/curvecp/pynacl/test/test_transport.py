@@ -114,20 +114,26 @@ def test_clientInitiate(clientTransport):
 
 def test_handshakeTimeout_noResponse(clientTransport):
     t = clientTransport
+    fired = []
+    t.deferred.addErrback(fired.append)
     t.clock.pump([1, 1, 2, 3, 5, 8, 13])
-    assert t.deferred.result.check(e.HandshakeTimeout)
+    assert fired[0].check(e.HandshakeTimeout)
 
 def test_handshakeTimeout_noResponseAfterCookie(clientTransport):
     t = clientTransport
     t.datagramReceived(serverCookie, serverHostPort)
+    fired = []
+    t.deferred.addErrback(fired.append)
     t.clock.pump([1, 1, 2, 3, 5, 8, 13])
-    assert t.deferred.result.check(e.HandshakeTimeout)
+    assert fired[0].check(e.HandshakeTimeout)
 
 def test_handshakeTimeout_noResponseAfterHello(serverTransport):
     t = serverTransport
     t.datagramReceived(clientHello, clientHostPort)
+    fired = []
+    t.deferred.addErrback(fired.append)
     t.clock.pump([1, 1, 2, 3, 5, 8, 13])
-    assert t.deferred.result.check(e.HandshakeTimeout)
+    assert fired[0].check(e.HandshakeTimeout)
 
 
 serverNullMessage = (
