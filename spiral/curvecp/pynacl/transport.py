@@ -88,7 +88,6 @@ class _CurveCPBaseTransport(DatagramProtocol):
         self.reads = self.writes = None
         self.done = False
         self.outstandingMessages = 0
-        self.datafile = open('data.%d.csv' % (os.getpid(),), 'w')
 
     def _timedOutHandshaking(self):
         print 'timed out'
@@ -145,7 +144,6 @@ class _CurveCPBaseTransport(DatagramProtocol):
         sentAt = self.sentMessageAt.pop(message.previousID, None)
         if sentAt is not None:
             self.congestion.processDelta(now, now - sentAt)
-            self.congestion.writerow(now, self.datafile)
         if message.id:
             self.clock.callLater(0, self.sendAMessage, ack=message.id)
         self._theyAcked.update(message.ranges)
