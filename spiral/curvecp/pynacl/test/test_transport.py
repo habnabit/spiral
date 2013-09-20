@@ -5,6 +5,7 @@ from twisted.internet.protocol import Factory
 from twisted.internet.task import Clock
 from twisted.test.proto_helpers import AccumulatingProtocol, FakeDatagramTransport
 
+import spiral.curvecp.errors as e
 from spiral.curvecp.pynacl import transport
 from spiral.curvecp.pynacl.interval import halfOpen
 from spiral.curvecp.pynacl.message import Message
@@ -109,6 +110,24 @@ def test_clientInitiate(clientTransport):
     t = clientTransport
     t.datagramReceived(serverCookie, serverHostPort)
     assert t.transport.written[1][0] == clientInitiate
+
+
+def test_handshakeTimeout_noResponse(clientTransport):
+    t = clientTransport
+    t.clock.pump([1, 1, 2, 3, 5, 8, 13])
+    assert t.deferred.result.check(e.HandshakeTimeout)
+
+def test_handshakeTimeout_noResponseAfterCookie(clientTransport):
+    t = clientTransport
+    t.datagramReceived(serverCookie, serverHostPort)
+    t.clock.pump([1, 1, 2, 3, 5, 8, 13])
+    assert t.deferred.result.check(e.HandshakeTimeout)
+
+def test_handshakeTimeout_noResponseAfterHello(serverTransport):
+    t = serverTransport
+    t.datagramReceived(clientHello, clientHostPort)
+    t.clock.pump([1, 1, 2, 3, 5, 8, 13])
+    assert t.deferred.result.check(e.HandshakeTimeout)
 
 
 serverNullMessage = (

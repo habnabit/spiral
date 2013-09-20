@@ -90,7 +90,7 @@ class _CurveCPBaseTransport(DatagramProtocol):
         self.outstandingMessages = 0
 
     def _timedOutHandshaking(self):
-        print 'timed out'
+        self.deferred.errback(e.HandshakeTimeout())
 
     def _write(self, data):
         print 'wrote', len(data), 'to', self.peerHost

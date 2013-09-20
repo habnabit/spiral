@@ -1,3 +1,7 @@
+class HandshakeTimeout(Exception):
+    pass
+
+
 class CurveCPConnectionDone(Exception):
     pass
 
