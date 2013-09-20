@@ -274,8 +274,13 @@ def test_emptyingTheMessageQueueWaitsForAWhile(messageTransport):
     t = messageTransport
     t.write('hi')
     t.clock.pump([1, 10])
-    assert len(t.sendMessage.captured) == 2
     t.parseMessage(t.now(), Message(0, 1, [halfOpen(0, 2)], None, 0, '').pack())
     t.clock.advance(10)
     assert len(t.sendMessage.captured) == 2
     assert nextCallIn(t.clock) == 60
+
+def test_messagesResendAfterTimingOut(messageTransport):
+    t = messageTransport
+    t.write('hi')
+    t.clock.pump([1, 5, 5, 5, 5])
+    assert len(t.sendMessage.captured) == 3
