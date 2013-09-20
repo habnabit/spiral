@@ -1,4 +1,6 @@
-from nacl.public import PrivateKey
+import struct
+
+from nacl.public import PrivateKey, Box
 import pytest
 from twisted.internet import defer
 from twisted.internet.protocol import Factory
@@ -12,15 +14,22 @@ from spiral.curvecp.pynacl.message import Message
 from spiral.curvecp.pynacl.test.util import runUntilNext, nextCallIn
 
 
+nonceStruct = struct.Struct('<Q')
+
 clientLongKey = PrivateKey('67c08747363633d2e3f8c00e3d67822ece85714015131dac10e88ae09dab523e'.decode('hex'))
 clientShortKey = PrivateKey('1057deeabc6fa4b9a255416915ce4a5f6bbe4255511541e1c390d217b970e0cb'.decode('hex'))
 clientExtension = '\1' * 16
 clientHostPort = '0.0.0.0', 1235
+clientHostPort2 = '0.0.0.0', 21235
 
 serverLongKey = PrivateKey('2de5f46cad518a4e84295f615cc35cb0fe83ba5339a5be611ddef17969e01d1c'.decode('hex'))
 serverShortKey = PrivateKey('2f13e4722b9441b3111661c7f27f94a9fa4223e293bef5bad13846a3c6ad4f29'.decode('hex'))
 serverExtension = '\2' * 16
 serverHostPort = '0.0.0.0', 1234
+serverHostPort2 = '0.0.0.0', 21234
+
+clientServerShortBox = Box(clientShortKey, serverShortKey.public_key)
+serverClientShortBox = Box(serverShortKey, clientShortKey.public_key)
 
 
 def finishTransport(clock, t, key):
@@ -136,16 +145,23 @@ def test_handshakeTimeout_noResponseAfterHello(serverTransport):
     assert fired[0].check(e.HandshakeTimeout)
 
 
-serverNullMessage = (
+serverNullMessage = lambda nonce=1: (
     'RL3aNMXM'
     + clientExtension
     + serverExtension
-    + '\1\0\0\0\0\0\0\0'
-    + """
-gaX0xIRYRf2fmU8bfnAQETLazr2qeEKCFLbDfYAM4Ti0Eg3PFyjzB36P3dOION+X7me+ce6qy0NP
-4Z5sF4SD6oDnwpy96smlJGMI69XrJ/fMYZQKmp8QkFs+9T4rQkre6uNEUZQdB98djOGxN7+S6vFq
-XnGYX/kcxwlJaoCF81JnVAlxM8bp+4Ng+nv/Up1F6KagLRtrvMZ3ZYuf27eubqpSrKDEdvMOF7U4
-TsC59BiRR6sdDoc2Pt5m7eJ5rl8c1XyA90Ir/toUjO5hF7xmBQ==""".decode('base64'))
+    + nonceStruct.pack(nonce)
+    + serverClientShortBox.encrypt(
+        '\0' * 192, 'CurveCP-server-M' + nonceStruct.pack(nonce)).ciphertext)
+
+clientNullMessage = lambda nonce=1: (
+    'QvnQ5XlM'
+    + serverExtension
+    + clientExtension
+    + str(clientShortKey.public_key)
+    + nonceStruct.pack(nonce)
+    + clientServerShortBox.encrypt(
+        '\0' * 192, 'CurveCP-client-M' + nonceStruct.pack(nonce)).ciphertext)
+
 
 class FakeCongestion(object):
     def __init__(self):
@@ -188,7 +204,7 @@ def captureMessages(t):
 def clientMessageTransport(clientTransport):
     clientTransport.congestion = FakeCongestion()
     clientTransport.datagramReceived(serverCookie, serverHostPort)
-    clientTransport.datagramReceived(serverNullMessage, serverHostPort)
+    clientTransport.datagramReceived(serverNullMessage(), serverHostPort)
     return captureMessages(clientTransport)
 
 @pytest.fixture
@@ -309,3 +325,21 @@ def test_messagesResendAfterTimingOut(messageTransport):
     t.write('hi')
     t.clock.pump([1, 5, 5, 5, 5])
     assert len(t.sendMessage.captured) == 3
+
+def test_messagesSendToLastHost(serverMessageTransport):
+    t = serverMessageTransport
+    t.datagramReceived(clientNullMessage(1), clientHostPort)
+    t.write('hi')
+    assert t.transport.written[0][1] == clientHostPort
+    t.datagramReceived(clientNullMessage(2), clientHostPort2)
+    t.clock.advance(1)
+    assert t.transport.written[1][1] == clientHostPort2
+
+def test_messagesSendToLastHostWithValidPackets(serverMessageTransport):
+    t = serverMessageTransport
+    t.datagramReceived(clientNullMessage(1), clientHostPort)
+    t.write('hi')
+    assert t.transport.written[0][1] == clientHostPort
+    t.datagramReceived('hi', clientHostPort2)
+    t.clock.advance(1)
+    assert t.transport.written[1][1] == clientHostPort
