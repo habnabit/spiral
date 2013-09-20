@@ -93,7 +93,6 @@ class _CurveCPBaseTransport(DatagramProtocol):
         self.deferred.errback(e.HandshakeTimeout())
 
     def _write(self, data):
-        print 'wrote', len(data), 'to', self.peerHost
         self.transport.write(data, self.peerHost)
 
     def _retrySendingForHandshake(self, data):
@@ -104,7 +103,6 @@ class _CurveCPBaseTransport(DatagramProtocol):
 
     messageMap = {}
     def datagramReceived(self, data, host_port):
-        print 'got', len(data), 'from', host_port
         if self.done:
             return
         handler = self.messageMap.get(data[:8])
@@ -130,7 +128,6 @@ class _CurveCPBaseTransport(DatagramProtocol):
         return ''
 
     def sendMessage(self, message):
-        print 'out', message
         packet = self._serializeMessage(message)
         self._write(packet)
         if message.id:
@@ -139,7 +136,6 @@ class _CurveCPBaseTransport(DatagramProtocol):
 
     def parseMessage(self, now, message):
         message = parseMessage(message)
-        print 'in', message
 
         sentAt = self.sentMessageAt.pop(message.previousID, None)
         if sentAt is not None:
@@ -162,7 +158,6 @@ class _CurveCPBaseTransport(DatagramProtocol):
             self.theirStreamEnd = message.dataPos
             self.theirResolution = message.resolution
             self._received.add(halfOpen(message.dataPos, message.dataPos + 1))
-            print 'got resolution', self._received
             self.reads = 'closing'
             self._checkTheirResolution()
             return
@@ -188,7 +183,6 @@ class _CurveCPBaseTransport(DatagramProtocol):
         if len(self._received) != 1:
             return
         self.reads = 'closed'
-        print 'they are done'
         self._checkBothResolutions()
 
     def _checkBothResolutions(self):
@@ -198,7 +192,6 @@ class _CurveCPBaseTransport(DatagramProtocol):
             self.clock.callLater(sum(self.timeouts), self._completelyDone)
 
     def _completelyDone(self):
-        print 'completely done'
         self.done = True
 
     def sendAMessage(self, ack=None):
@@ -307,7 +300,6 @@ class _CurveCPBaseTransport(DatagramProtocol):
 
     def _doneWritingAcked(self, when):
         self.writes = 'closed'
-        print 'closed'
         self._checkBothResolutions()
         return when
 
@@ -319,7 +311,6 @@ class _CurveCPBaseTransport(DatagramProtocol):
         interval = IntervalSet([halfOpen(streamEnd, streamEnd + 1)])
         self.enqueue(1, QueuedResolution(interval, streamEnd, [d], [], [], resolution))
         self.writes = 'closing'
-        print 'closing'
         return d
 
 
@@ -368,18 +359,15 @@ class CurveCPClientTransport(_CurveCPBaseTransport):
 
     def datagram_cookie(self, data, host_port):
         if len(data) != _cookieStruct.size or not self._verifyPacketStart(data):
-            print 'bad cookie'
             return
         nonce, encrypted = _cookieStruct.unpack(data)
         try:
             decrypted = self._shortLongBox.decrypt(encrypted, 'CurveCPK' + nonce)
         except CryptoError:
-            print 'bad cookie crypto'
             return
         serverShortKeyString, cookie = _cookieInnerStruct.unpack(decrypted)
         serverShortKey = PublicKey(serverShortKeyString)
         if self.awaiting != 'cookie' and (cookie != self._cookie or serverShortKey != self._serverShortKey):
-            print 'already got cookie'
             return
 
         self.peerHost = host_port
@@ -413,16 +401,13 @@ class CurveCPClientTransport(_CurveCPBaseTransport):
         if self.awaiting not in ('first-message', 'message'):
             return
         if not self._verifyPacketStart(data):
-            print 'bad message'
             return
         nonce, = _serverMessageStruct.unpack_from(data)
         try:
             decrypted = self._shortShortBox.decrypt(data[48:], 'CurveCP-server-M' + nonce)
         except CryptoError:
-            print 'bad message crypto'
             return
         if not self._verifyNonce(nonce):
-            print 'bad nonce'
             return
         if self.awaiting == 'first-message':
             self.initiateMultiCall.cancel()
@@ -483,13 +468,11 @@ class CurveCPServerTransport(_CurveCPBaseTransport):
         if self.awaiting not in ('hello', 'initiate'):
             return
         if len(data) != _helloStruct.size or not self._verifyPacketStart(data):
-            print 'bad hello'
             return
         nonce, encrypted = _helloStruct.unpack(data)
         try:
             self._longShortBox.decrypt(encrypted, 'CurveCP-client-H' + nonce)
         except CryptoError:
-            print 'bad hello crypto'
             return
         self.peerHost = host_port
         if self.awaiting == 'hello':
@@ -512,12 +495,10 @@ class CurveCPServerTransport(_CurveCPBaseTransport):
             return
         cookie, nonce = _initiateStruct.unpack_from(data)
         if cookie != self.cookie or not self._verifyPacketStart(data):
-            print 'bad initiate'
             return
         try:
             decrypted = self._shortShortBox.decrypt(data[176:], 'CurveCP-client-I' + nonce)
         except CryptoError:
-            print 'bad initiate crypto'
             return
         clientKeyString, vouchNonce, encryptedVouch, serverDomain = _initiateInnerStruct.unpack_from(decrypted)
         clientKey = PublicKey(clientKeyString)
@@ -525,10 +506,8 @@ class CurveCPServerTransport(_CurveCPBaseTransport):
         try:
             vouchKey = longLongBox.decrypt(encryptedVouch, 'CurveCPV' + vouchNonce)
         except CryptoError:
-            print 'bad vouch crypto'
             return
         if vouchKey != str(self._clientShortKey):
-            print 'bad vouch'
             return
         if self.clientKey is None:
             self.clientKey = clientKey
@@ -536,7 +515,6 @@ class CurveCPServerTransport(_CurveCPBaseTransport):
             self.reschedule('message')
             self._peerEstablished()
         elif self.clientKey != clientKey:
-            print 'already got key'
             return
         self.peerHost = host_port
         message = decrypted[352:]
