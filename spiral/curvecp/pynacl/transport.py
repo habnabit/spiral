@@ -377,7 +377,7 @@ class CurveCPClientTransport(_CurveCPBaseTransport):
             self._cookie = cookie
             self._serverShortKey = serverShortKey
             self._shortShortBox = Box(self._clientShortKey, self._serverShortKey)
-            message = '\0' * 192
+            message = '\1\0\0\0\0\0\0\0' + '\0' * 184
             longLongNonce = self.urandom(16)
             longLongBox = Box(self.clientKey, self.serverKey)
             initiatePacketContent = (
