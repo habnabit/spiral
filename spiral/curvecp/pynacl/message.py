@@ -50,17 +50,28 @@ class Message(_MessageBase):
             ranges = [halfOpen(0, 0)] + ranges[:5]
         izip = itertools.izip_longest(
             ranges, self.rangePackers, fillvalue=None)
+        donePacking = False
         for i, (deltaPack, spanPack) in izip:
-            i = i or halfOpen(prev, prev)
+            i = halfOpen(prev, prev) if not i or donePacking else i
             if not i.lower_closed or i.upper_closed:
                 raise ValueError('every interval must be half-open')
             if deltaPack is None and i.lower_bound != 0:
                 raise ValueError('first interval must start at 0')
             if deltaPack is not None:
-                ret.append(deltaPack.pack(i.lower_bound - prev))
-                prev = i.lower_bound
-            ret.append(spanPack.pack(i.upper_bound - prev))
-            prev = i.upper_bound
+                try:
+                    ret.append(deltaPack.pack(i.lower_bound - prev))
+                except struct.error:
+                    ret.append(deltaPack.pack(0))
+                    donePacking = True
+                else:
+                    prev = i.lower_bound
+            try:
+                ret.append(spanPack.pack(i.upper_bound - prev))
+            except struct.error:
+                ret.append(spanPack.pack(0))
+                donePacking = True
+            else:
+                prev = i.upper_bound
         return ''.join(ret)
 
     def pack(self):

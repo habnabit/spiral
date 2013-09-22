@@ -160,6 +160,7 @@ class _CurveCPBaseTransport(DatagramProtocol):
             self._received.add(halfOpen(message.dataPos, message.dataPos + 1))
             self.reads = 'closing'
             self._checkTheirResolution()
+            self.protocol.readConnectionLost()
             return
         elif not message.data:
             return
@@ -272,7 +273,8 @@ class _CurveCPBaseTransport(DatagramProtocol):
         if not data:
             return defer.succeed(None)
         elif self.writes in ('closing', 'closed'):
-            return defer.fail(e.CurveCPConnectionDone())
+            return defer.fail(e.CurveCPConnectionDone(
+                'attempted a write after closing writes'))
 
         d = defer.Deferred()
         qds = []

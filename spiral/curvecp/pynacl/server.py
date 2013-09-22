@@ -19,5 +19,10 @@ class CurveCPServerDispatcher(DatagramProtocol):
             transport = self.transports[clientID] = CurveCPServerTransport(
                 self.reactor, self.serverKey, self.factory, clientID)
             transport.transport = self.transport
+            transport.startProtocol()
+            transport.deferred.addErrback(self._transportFailed, clientID)
 
         self.transports[clientID].datagramReceived(data, host_port)
+
+    def _transportFailed(self, reason, clientID):
+        del self.transports[clientID]
