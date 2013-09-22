@@ -1,3 +1,8 @@
+import os
+
+from nacl.public import PrivateKey
+
+
 def nameToDNS(name):
     ret = []
     for part in name.strip('.').split('.'):
@@ -14,3 +19,8 @@ def dnsToName(dns):
         ret.append(dns[pos + 1:pos + 1 + length])
         pos += 1 + length
     return '.'.join(ret)
+
+
+def loadKeydir(keydir):
+    with open(os.path.join(keydir, '.expertsonly', 'secretkey')) as infile:
+        return PrivateKey(infile.read())
