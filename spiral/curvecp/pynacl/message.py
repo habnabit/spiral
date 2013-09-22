@@ -2,6 +2,7 @@ import collections
 import itertools
 import struct
 
+import interval
 from parsley import makeGrammar
 
 from spiral.curvecp.pynacl.interval import halfOpen
@@ -10,6 +11,16 @@ from spiral.curvecp.pynacl.interval import halfOpen
 _uint16 = struct.Struct('<H')
 _uint32 = struct.Struct('<I')
 _uint64 = struct.Struct('<Q')
+_maxima = {s: s.unpack('\xff' * s.size)[0] for s in [_uint16, _uint32, _uint64]}
+
+def packInto(s, val, target):
+    maximum = _maxima[s]
+    if val > maximum:
+        target.append('\xff' * s.size)
+        return val - maximum
+    else:
+        target.append(s.pack(val)),
+        return 0
 
 
 _MessageBase = collections.namedtuple('_Message', [
@@ -48,30 +59,24 @@ class Message(_MessageBase):
         ranges = self.ranges
         if ranges and ranges[0].lower_bound != 0:
             ranges = [halfOpen(0, 0)] + ranges[:5]
-        izip = itertools.izip_longest(
-            ranges, self.rangePackers, fillvalue=None)
-        donePacking = False
-        for i, (deltaPack, spanPack) in izip:
-            i = halfOpen(prev, prev) if not i or donePacking else i
-            if not i.lower_closed or i.upper_closed:
-                raise ValueError('every interval must be half-open')
-            if deltaPack is None and i.lower_bound != 0:
-                raise ValueError('first interval must start at 0')
-            if deltaPack is not None:
-                try:
-                    ret.append(deltaPack.pack(i.lower_bound - prev))
-                except struct.error:
-                    ret.append(deltaPack.pack(0))
-                    donePacking = True
-                else:
-                    prev = i.lower_bound
-            try:
-                ret.append(spanPack.pack(i.upper_bound - prev))
-            except struct.error:
-                ret.append(spanPack.pack(0))
-                donePacking = True
-            else:
+        rangeIter = iter(ranges)
+        remainingDelta = remainingSpan = None
+        for deltaPack, spanPack in self.rangePackers:
+            if not (remainingSpan or remainingDelta):
+                i = next(rangeIter, None) or halfOpen(prev, prev)
+                if not i.lower_closed or i.upper_closed:
+                    raise ValueError('every interval must be half-open')
+                if deltaPack is None and i.lower_bound != 0:
+                    raise ValueError('first interval must start at 0')
+                remainingDelta = i.lower_bound - prev
+                remainingSpan = i.upper_bound - i.lower_bound
                 prev = i.upper_bound
+            if deltaPack is not None:
+                remainingDelta = packInto(deltaPack, remainingDelta, ret)
+            if not remainingDelta:
+                remainingSpan = packInto(spanPack, remainingSpan, ret)
+            else:
+                packInto(spanPack, 0, ret)
         return ''.join(ret)
 
     def pack(self):

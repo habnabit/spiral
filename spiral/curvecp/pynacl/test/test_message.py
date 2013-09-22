@@ -22,7 +22,7 @@ messagePackPairs = [
 
 @pytest.mark.parametrize(('input', 'expected'), messagePackPairs)
 def test_messagePack(input, expected):
-    assert input.pack_data() == expected
+    assert input.pack_data().encode('hex') == expected.encode('hex')
 
 def test_messagePackFailure():
     m = Message(0, 0, [], None, 0, '\0' * 1025)
@@ -42,8 +42,17 @@ messagePackRangesPairs = [
         halfOpen(18446744078004912120, 18446744078004977655),
         halfOpen(18446744078005043190, 18446744078005108725)
     ], '\xff' * 30),
+
+    # overflows
+    ([halfOpen(0, 18446744073709551616)], '\xff' * 8 + '\0\0\0\0\1\0' + '\0' * 16),
+    ([halfOpen(0, 18446744073709879290)], '\xff' * 8 + '\0\0\0\0\xff\xff' + '\0\0\xff\xff' * 4),
+    ([halfOpen(0, 1), halfOpen(2, 65540)], '\1\0\0\0\0\0\0\0' '\1\0\0\0\xff\xff' '\0\0\3\0' + '\0' * 12),
+    ([halfOpen(0, 1), halfOpen(2, 3), halfOpen(65540, 65541)],
+     '\1\0\0\0\0\0\0\0' '\1\0\0\0\1\0' '\xff\xff\0\0' '\2\0\1\0' + '\0' * 8),
+    ([halfOpen(0, 1), halfOpen(2, 327676)],
+     '\1\0\0\0\0\0\0\0' '\1\0\0\0\xff\xff' + '\0\0\xff\xff' * 3 + '\0\0\xfe\xff'),
 ]
 
 @pytest.mark.parametrize(('input', 'expected'), messagePackRangesPairs)
 def test_messagePackRanges(input, expected):
-    assert Message(0, 0, input, None, 0, '').pack_ranges() == expected
+    assert Message(0, 0, input, None, 0, '').pack_ranges().encode('hex') == expected.encode('hex')
