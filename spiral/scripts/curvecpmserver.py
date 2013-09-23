@@ -61,7 +61,6 @@ def main():
     parser.add_argument('-n', '--name')
     parser.add_argument('-e', '--server-extension', default='0' * 32)
     parser.add_argument('keydir')
-    parser.add_argument('host')
     parser.add_argument('port', type=int)
     parser.add_argument('program')
     parser.add_argument('argv', nargs='*')

@@ -6,6 +6,7 @@ from twisted.internet.task import react
 from twisted.internet import defer, protocol
 
 from spiral.curvecp.pynacl.endpoints import CurveCPClientEndpoint
+from spiral.curvecp.util import loadKeydir
 
 
 class CurveCPMClientProcessProtocol(protocol.ProcessProtocol):
@@ -17,7 +18,7 @@ class CurveCPMClientProcessProtocol(protocol.ProcessProtocol):
         self.proto.transport.write(data)
 
     def childConnectionLost(self, fd):
-        if fd == 6:
+        if fd == 7:
             self.proto.transport.loseConnection()
 
     def processEnded(self, status):
@@ -55,11 +56,15 @@ class CurveCPMClientFactory(protocol.ClientFactory):
 
 
 def twistedMain(reactor, args):
+    clientKey = None
+    if args.client_keydir is not None:
+        clientKey = loadKeydir(args.client_keydir)
     fac = CurveCPMClientFactory(reactor, args)
     e = CurveCPClientEndpoint(
-        reactor, args.host, args.port, PublicKey(args.key.decode('hex')),
+        reactor, args.host, args.port,
+        serverKey=PublicKey(args.key.decode('hex')),
         serverExtension=args.server_extension.decode('hex'),
-        clientExtension=args.client_extension.decode('hex'))
+        clientKey=clientKey, clientExtension=args.client_extension.decode('hex'))
     d = e.connect(fac)
     d.addCallback(lambda proto: proto.deferred)
     return d
@@ -68,6 +73,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-n', '--name')
     parser.add_argument('-e', '--server-extension', default='0' * 32)
+    parser.add_argument('-k', '--client-keydir')
     parser.add_argument('--client-extension', default='0' * 32)
     parser.add_argument('key')
     parser.add_argument('host')
