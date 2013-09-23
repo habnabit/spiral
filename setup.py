@@ -12,7 +12,6 @@ setup(
         'License :: OSI Approved :: ISC License (ISCL)',
         'Operating System :: OS Independent',
         'Programming Language :: Python :: 2',
-        'Programming Language :: Python :: 2.6',
         'Programming Language :: Python :: 2.7',
         'Topic :: Security',
     ],
@@ -20,6 +19,10 @@ setup(
 
     setup_requires=['vcversioner'],
     vcversioner={},
+    install_requires=[
+        'Twisted',
+        'Parsley',
+    ],
     entry_points={
         'console_scripts': [
             'curvecpmserver = spiral.scripts.curvecpmserver:main',
