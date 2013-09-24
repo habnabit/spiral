@@ -180,7 +180,7 @@ class _CurveCPBaseTransport(DatagramProtocol):
     def _checkTheirResolution(self):
         if self.theirStreamEnd is None:
             return
-        if len(self._received) != 1:
+        if len(self._received) != 1 or self._received.lower_bound() != 0:
             return
         self.reads = 'closed'
         self.protocol.readConnectionLost()

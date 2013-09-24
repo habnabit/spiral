@@ -39,10 +39,16 @@ def finishTransport(clock, t, key):
     t.makeConnection(FakeDatagramTransport())
     return t
 
+class HalfCloseAccumulatingProtocol(AccumulatingProtocol):
+    readsClosed = False
+
+    def readConnectionLost(self):
+        self.readsClosed = True
+
 @pytest.fixture
 def accumulatingFactory():
     fac = Factory()
-    fac.protocol = AccumulatingProtocol
+    fac.protocol = HalfCloseAccumulatingProtocol
     fac.protocolConnectionMade = defer.Deferred()
     return fac
 
@@ -96,6 +102,26 @@ def test_serverCookie(serverTransport):
 
 
 clientInitiate = (
+    'QvnQ5XlI'
+    + serverExtension
+    + clientExtension
+    + str(clientShortKey.public_key)
+    + '\0' * 96
+    + '\1\0\0\0\0\0\0\0'
+    + """
+L4uxef7SbJ8QWPLbxSMPP9sfUWLlT5iOBoyRrhIfWOyGw90ZGaA6qNG7LKIJjCjhJNA8WcjrUESU
+XM8hYnZ3mgH7NQCKKpgBJj8nXX5zgPaet4OyXU1f4tkexiBlnQsCDqmg3t6h8xpqeER5HVSeNvYE
+g00hKXbw0Uh1SYmOvg7GPazk0d+4IRgSAT9qUcFC0bEuueD24RsFhm+MLmmVkJjpORTq6wLGjaey
+B5TSI4uBFafXv01X6DTaSDHcuN0EkyMHYv3faxknYhhxof7fA6m5t6ARIOfr3foG0mZ629Cjb/XK
+Qf7V6WJmReDAFoX5q0+rxClE4zM086KELEd/w8AFtHF6qgQrxxIJHyPwryICD358+UolGYP0bYbT
+4D42hJ0JlTIa1h3wPLqQLyaRRTPDvHR38ENtMR/qWm6eg8/aK1x7WJPspl4vFJqthDwE9Vbmtixf
+bgcieCxnVX47VkL37EntmzuSsdNhshiGkpLZJ4m8Tk9hVSlEy2N60ValKjZwOqthhUD/0jvoJSoz
+Nhk4+Ki7496AAc71pZ8jA9Qd9Xggemlvedxf6EkTL7MyGnqmVwtz7iTnOyIYUNs0nA5KOdalwNSu
+1NAtoIxx6YNEP7JebtO/nIvH+hN97/fYHJwU05wLtdXERwFVAvkRnpBlKj9QjaUIrg+70r1sPOUx
+tkhIjjiBSbLTYrIBTwvFenlE5dGG9zVkXYXexKY+8Rcd2wG1m/X31fusjNxuXqY=
+""".decode('base64'))
+
+clientNullInitiate = (
     'QvnQ5XlI'
     + serverExtension
     + clientExtension
@@ -211,7 +237,7 @@ def clientMessageTransport(clientTransport):
 def serverMessageTransport(serverTransport):
     serverTransport.congestion = FakeCongestion()
     serverTransport.datagramReceived(clientHello, clientHostPort)
-    serverTransport.datagramReceived(clientInitiate, clientHostPort)
+    serverTransport.datagramReceived(clientNullInitiate, clientHostPort)
     return captureMessages(serverTransport)
 
 @pytest.fixture(scope='function', params=['client', 'server'])
@@ -282,6 +308,13 @@ def test_closeDeferredFiresAfterSendingData(messageTransport):
     assert not fired
     t.parseMessage(t.now(), Message(0, 1, [halfOpen(0, 11)], None, 0, '').pack())
     assert fired[0] == t.now()
+
+def test_readConnectionClosesAfterAllDataIsRead(messageTransport):
+    t = messageTransport
+    t.parseMessage(t.now(), Message(1, 0, [], 'success', 4, '').pack())
+    assert not t.protocol.readsClosed
+    t.parseMessage(t.now(), Message(2, 0, [], None, 0, 'spam').pack())
+    assert t.protocol.readsClosed
 
 def test_receivingData(messageTransport):
     t = messageTransport
