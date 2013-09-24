@@ -22,13 +22,14 @@ class CurveCPMClientProcessProtocol(protocol.ProcessProtocol):
             self.proto.transport.loseConnection()
 
     def processEnded(self, status):
-        self.proto.deferred.callback(None)
+        self.proto.childProcessEnded = True
 
 
 class CurveCPMClientProtocol(protocol.Protocol):
     def __init__(self):
         self.processProto = CurveCPMClientProcessProtocol(self)
         self.deferred = defer.Deferred()
+        self.childProcessEnded = False
 
     def connectionMade(self):
         env = os.environ.copy()
@@ -41,10 +42,15 @@ class CurveCPMClientProtocol(protocol.Protocol):
                 0: 0, 1: 1, 2: 2, 6: 'w', 7: 'r'})
 
     def dataReceived(self, data):
-        self.processProto.transport.writeToChild(6, data)
+        if not self.childProcessEnded:
+            self.processProto.transport.writeToChild(6, data)
 
     def readConnectionLost(self):
-        self.processProto.transport.closeChildFD(6)
+        if not self.childProcessEnded:
+            self.processProto.transport.closeChildFD(6)
+
+    def connectionLost(self, status):
+        self.deferred.callback(None)
 
 
 class CurveCPMClientFactory(protocol.ClientFactory):
