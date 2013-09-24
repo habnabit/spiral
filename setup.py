@@ -22,6 +22,9 @@ setup(
     install_requires=[
         'Twisted',
         'Parsley',
+        'interval',
+        'cykeccak',
+        'pynacl',
     ],
     entry_points={
         'console_scripts': [
