@@ -160,7 +160,6 @@ class _CurveCPBaseTransport(DatagramProtocol):
             self._received.add(halfOpen(message.dataPos, message.dataPos + 1))
             self.reads = 'closing'
             self._checkTheirResolution()
-            self.protocol.readConnectionLost()
             return
         elif not message.data:
             return
@@ -184,6 +183,7 @@ class _CurveCPBaseTransport(DatagramProtocol):
         if len(self._received) != 1:
             return
         self.reads = 'closed'
+        self.protocol.readConnectionLost()
         self._checkBothResolutions()
 
     def _checkBothResolutions(self):
