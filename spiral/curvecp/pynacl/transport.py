@@ -16,6 +16,7 @@ from twisted.python.failure import Failure
 
 import spiral.curvecp.errors as e
 from spiral.curvecp.address import CurveCPAddress
+from spiral.curvecp.keydir import EphemeralKey
 from spiral.curvecp.util import nameToDNS, dnsToName
 from spiral.curvecp.pynacl.chicago import Chicago
 from spiral.curvecp.pynacl.interval import halfOpen
@@ -61,6 +62,7 @@ class _CurveCPBaseTransport(DatagramProtocol):
     timeouts = 1, 1, 2, 3, 5, 8, 13
     now = staticmethod(time.time)
     generateKey = staticmethod(PrivateKey.generate)
+    generateKeydir = staticmethod(EphemeralKey)
     urandom = staticmethod(os.urandom)
 
     def __init__(self, clock, serverKey, factory):
@@ -324,7 +326,7 @@ class CurveCPClientTransport(_CurveCPBaseTransport):
         self.serverDomain = host
         self.serverExtension = serverExtension
         if clientKey is None:
-            clientKey = self.generateKey()
+            clientKey = self.generateKeydir()
         self.clientKey = clientKey
         self.clientExtension = clientExtension
         self.awaiting = 'cookie'
@@ -378,10 +380,10 @@ class CurveCPClientTransport(_CurveCPBaseTransport):
             self._serverShortKey = serverShortKey
             self._shortShortBox = Box(self._clientShortKey, self._serverShortKey)
             message = '\1\0\0\0\0\0\0\0' + '\0' * 184
-            longLongNonce = self.urandom(16)
-            longLongBox = Box(self.clientKey, self.serverKey)
+            longLongNonce = self.clientKey.nonce()
+            longLongBox = Box(self.clientKey.key, self.serverKey)
             initiatePacketContent = (
-                str(self.clientKey.public_key)
+                str(self.clientKey.key.public_key)
                 + longLongNonce
                 + longLongBox.encrypt(str(self._clientShortKey.public_key), 'CurveCPV' + longLongNonce).ciphertext
                 + nameToDNS(self.serverDomain)
@@ -424,7 +426,7 @@ class CurveCPClientTransport(_CurveCPBaseTransport):
         host = self.transport.getHost()
         return CurveCPAddress(
             self.clientExtension, self.serverExtension, self.serverDomain,
-            self.clientKey.public_key, (host.host, host.port))
+            self.clientKey.key.public_key, (host.host, host.port))
 
     def getPeer(self):
         return CurveCPAddress(
@@ -451,7 +453,7 @@ class CurveCPServerTransport(_CurveCPBaseTransport):
 
     def startProtocol(self):
         self._serverShortKey = self.generateKey()
-        self._longShortBox = Box(self.serverKey, self._clientShortKey)
+        self._longShortBox = Box(self.serverKey.key, self._clientShortKey)
         self._shortShortBox = Box(self._serverShortKey, self._clientShortKey)
 
     def _serializeMessage(self, message):
@@ -480,7 +482,7 @@ class CurveCPServerTransport(_CurveCPBaseTransport):
         if self.awaiting == 'hello':
             self.cookie = self.urandom(96)
             boxData = str(self._serverShortKey.public_key) + self.cookie
-            cookieNonce = self.urandom(16)
+            cookieNonce = self.serverKey.nonce(longterm=True)
             cookiePacket = (
                 'RL3aNMXK'
                 + self.clientExtension
@@ -504,7 +506,7 @@ class CurveCPServerTransport(_CurveCPBaseTransport):
             return
         clientKeyString, vouchNonce, encryptedVouch, serverDomain = _initiateInnerStruct.unpack_from(decrypted)
         clientKey = PublicKey(clientKeyString)
-        longLongBox = Box(self.serverKey, clientKey)
+        longLongBox = Box(self.serverKey.key, clientKey)
         try:
             vouchKey = longLongBox.decrypt(encryptedVouch, 'CurveCPV' + vouchNonce)
         except CryptoError:
@@ -543,7 +545,7 @@ class CurveCPServerTransport(_CurveCPBaseTransport):
         host = self.transport.getHost()
         return CurveCPAddress(
             self.clientExtension, self.serverExtension, self.serverDomain,
-            self.serverKey.public_key, (host.host, host.port))
+            self.serverKey.key.public_key, (host.host, host.port))
 
     def getPeer(self):
         return CurveCPAddress(

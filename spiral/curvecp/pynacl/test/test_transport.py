@@ -32,8 +32,17 @@ clientServerShortBox = Box(clientShortKey, serverShortKey.public_key)
 serverClientShortBox = Box(serverShortKey, clientShortKey.public_key)
 
 
+class FakeKeydir(object):
+    def __init__(self, key):
+        self.key = key
+
+    def nonce(self, longterm=False):
+        return '\0' * 16
+
+
 def finishTransport(clock, t, key):
     t.generateKey = lambda: key
+    t.generateKeydir = lambda: FakeKeydir(key)
     t.now = clock.seconds
     t.urandom = lambda n: '\0' * n
     t.makeConnection(FakeDatagramTransport())
@@ -57,14 +66,15 @@ def clientTransport(accumulatingFactory):
     clock = Clock()
     t = transport.CurveCPClientTransport(
         clock, serverLongKey.public_key, accumulatingFactory,
-        '0.0.0.0', 1234, serverExtension, clientLongKey, clientExtension)
+        '0.0.0.0', 1234, serverExtension, FakeKeydir(clientLongKey),
+        clientExtension)
     return finishTransport(clock, t, clientShortKey)
 
 @pytest.fixture
 def serverTransport(accumulatingFactory):
     clock = Clock()
     t = transport.CurveCPServerTransport(
-        clock, serverLongKey, accumulatingFactory,
+        clock, FakeKeydir(serverLongKey), accumulatingFactory,
         serverExtension + clientExtension + str(clientShortKey.public_key))
     return finishTransport(clock, t, serverShortKey)
 

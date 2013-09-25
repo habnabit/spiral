@@ -5,7 +5,7 @@ from twisted.internet.task import react
 from twisted.internet import defer, protocol
 
 from spiral.curvecp.pynacl.endpoints import CurveCPServerEndpoint
-from spiral.curvecp.util import loadKeydir
+from spiral.curvecp.keydir import Keydir
 
 
 class CurveCPMServerProcessProtocol(protocol.ProcessProtocol):
@@ -52,7 +52,7 @@ class CurveCPMServerFactory(protocol.Factory):
 
 def twistedMain(reactor, args):
     fac = CurveCPMServerFactory(reactor, args)
-    e = CurveCPServerEndpoint(reactor, loadKeydir(args.keydir), args.port)
+    e = CurveCPServerEndpoint(reactor, args.keydir, args.port)
     e.listen(fac)
     return defer.Deferred()
 
@@ -60,7 +60,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-n', '--name')
     parser.add_argument('-e', '--server-extension', default='0' * 32)
-    parser.add_argument('keydir')
+    parser.add_argument('keydir', type=Keydir)
     parser.add_argument('port', type=int)
     parser.add_argument('program')
     parser.add_argument('argv', nargs='*')
