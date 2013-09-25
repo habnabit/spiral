@@ -14,8 +14,6 @@ class CurveCPClientEndpoint(object):
         self.port = port
         self.serverKey = serverKey
         self.serverExtension = serverExtension
-        if clientKey is None:
-            clientKey = PrivateKey.generate()
         self.clientKey = clientKey
         self.clientExtension = clientExtension
 
