@@ -4,9 +4,11 @@ import os
 from nacl.public import PublicKey
 from twisted.internet.task import react
 from twisted.internet import defer, protocol
+from twisted.python import log
 
 from spiral.curvecp.pynacl.endpoints import CurveCPClientEndpoint
 from spiral.curvecp.keydir import Keydir
+from spiral.curvecp import curvecpm
 
 
 class CurveCPMClientProcessProtocol(protocol.ProcessProtocol):
@@ -15,11 +17,11 @@ class CurveCPMClientProcessProtocol(protocol.ProcessProtocol):
 
     def childDataReceived(self, fd, data):
         assert fd == 7
-        self.proto.transport.write(data)
+        self.proto.transport.write(data).addErrback(log.err)
 
     def childConnectionLost(self, fd):
         if fd == 7:
-            self.proto.transport.loseConnection()
+            self.proto.transport.loseConnection().addErrback(log.err)
 
     def processEnded(self, status):
         self.proto.childProcessEnded = True
@@ -32,12 +34,13 @@ class CurveCPMClientProtocol(protocol.Protocol):
         self.childProcessEnded = False
 
     def connectionMade(self):
+        args = [self.factory.args.program] + self.factory.args.argv
+        log.msg('spawning %r' % args, category='success')
         env = os.environ.copy()
         env.update(self.transport.getHost().asUCSPIEnv('client', 'client'))
         env.update(self.transport.getPeer().asUCSPIEnv('client', 'server'))
         self.factory.reactor.spawnProcess(
-            self.processProto, self.factory.args.program,
-            args=[self.factory.args.program] + self.factory.args.argv,
+            self.processProto, self.factory.args.program, args=args,
             env=env, childFDs={
                 0: 0, 1: 1, 2: 2, 6: 'w', 7: 'r'})
 
@@ -46,10 +49,12 @@ class CurveCPMClientProtocol(protocol.Protocol):
             self.processProto.transport.writeToChild(6, data)
 
     def readConnectionLost(self):
+        log.msg('read connection lost', category='success')
         if not self.childProcessEnded:
             self.processProto.transport.closeChildFD(6)
 
     def connectionLost(self, status):
+        log.msg('connection lost', category='success')
         self.deferred.callback(None)
 
 
@@ -62,6 +67,7 @@ class CurveCPMClientFactory(protocol.ClientFactory):
 
 
 def twistedMain(reactor, args):
+    curvecpm.startLogging(args.verbosity)
     fac = CurveCPMClientFactory(reactor, args)
     e = CurveCPClientEndpoint(
         reactor, args.host, args.port,
@@ -75,6 +81,7 @@ def twistedMain(reactor, args):
 
 def main():
     parser = argparse.ArgumentParser()
+    curvecpm.addLogArguments(parser)
     parser.add_argument('-n', '--name')
     parser.add_argument('-e', '--server-extension', default='0' * 32)
     parser.add_argument('-k', '--client-keydir', type=Keydir)

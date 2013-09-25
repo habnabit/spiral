@@ -1,4 +1,5 @@
 from twisted.internet.protocol import DatagramProtocol
+from twisted.python import log
 
 from spiral.curvecp.pynacl.transport import CurveCPServerTransport
 
@@ -15,7 +16,7 @@ class CurveCPServerDispatcher(DatagramProtocol):
         if clientID not in self.transports:
             if data[:8] != 'QvnQ5XlH':
                 return
-            print 'new transport', clientID.encode('hex')
+            log.msg('new client: %s' % clientID.encode('hex'), category='success')
             transport = self.transports[clientID] = CurveCPServerTransport(
                 self.reactor, self.serverKey, self.factory, clientID)
             transport.transport = self.transport

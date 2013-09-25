@@ -3,9 +3,11 @@ import os
 
 from twisted.internet.task import react
 from twisted.internet import defer, protocol
+from twisted.python import log
 
 from spiral.curvecp.pynacl.endpoints import CurveCPServerEndpoint
 from spiral.curvecp.keydir import Keydir
+from spiral.curvecp import curvecpm
 
 
 class CurveCPMServerProcessProtocol(protocol.ProcessProtocol):
@@ -14,11 +16,11 @@ class CurveCPMServerProcessProtocol(protocol.ProcessProtocol):
 
     def childDataReceived(self, fd, data):
         assert fd == 1
-        self.proto.transport.write(data)
+        self.proto.transport.write(data).addErrback(log.err)
 
     def childConnectionLost(self, fd):
         if fd == 1:
-            self.proto.transport.loseConnection()
+            self.proto.transport.loseConnection().addErrback(log.err)
 
 
 class CurveCPMServerProtocol(protocol.Protocol):
@@ -26,13 +28,13 @@ class CurveCPMServerProtocol(protocol.Protocol):
         self.processProto = CurveCPMServerProcessProtocol(self)
 
     def connectionMade(self):
-        print 'spawning'
+        args = [self.factory.args.program] + self.factory.args.argv
+        log.msg('spawning %r' % args, category='success')
         env = os.environ.copy()
         env.update(self.transport.getHost().asUCSPIEnv('server', 'server'))
         env.update(self.transport.getPeer().asUCSPIEnv('server', 'client'))
         self.factory.reactor.spawnProcess(
-            self.processProto, self.factory.args.program,
-            args=[self.factory.args.program] + self.factory.args.argv,
+            self.processProto, self.factory.args.program, args=args,
             env=env, childFDs={0: 'w', 1: 'r', 2: 2})
 
     def dataReceived(self, data):
@@ -51,6 +53,7 @@ class CurveCPMServerFactory(protocol.Factory):
 
 
 def twistedMain(reactor, args):
+    curvecpm.startLogging(args.verbosity)
     fac = CurveCPMServerFactory(reactor, args)
     e = CurveCPServerEndpoint(reactor, args.keydir, args.port)
     e.listen(fac)
@@ -58,6 +61,7 @@ def twistedMain(reactor, args):
 
 def main():
     parser = argparse.ArgumentParser()
+    curvecpm.addLogArguments(parser)
     parser.add_argument('-n', '--name')
     parser.add_argument('-e', '--server-extension', default='0' * 32)
     parser.add_argument('keydir', type=Keydir)
