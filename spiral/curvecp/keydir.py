@@ -4,8 +4,6 @@ import struct
 
 from nacl.public import PrivateKey
 
-from spiral.entropy import nonceSource
-
 
 counterStruct = struct.Struct('<Q')
 
@@ -29,7 +27,7 @@ class Keydir(object):
                 noncefile.seek(0)
                 data = counterStruct.pack(counter)
                 noncefile.write(data)
-        return nonceSource.squeeze(8) + data
+        return os.urandom(8) + data
 
 
 class EphemeralKey(object):
@@ -37,4 +35,4 @@ class EphemeralKey(object):
         self.key = PrivateKey.generate()
 
     def nonce(self, longterm=False):
-        return nonceSource.squeeze(16)
+        return os.urandom(16)

@@ -1,5 +1,7 @@
 from __future__ import division
 
+import os
+
 from nacl.exceptions import CryptoError
 from nacl.public import PublicKey, PrivateKey, Box
 from twisted.names.client import Resolver as NonrecursiveResolver
@@ -8,8 +10,6 @@ from twisted.names.error import ResolverError
 from twisted.names.root import Resolver as RecursiveResolver
 from twisted.internet.defer import maybeDeferred
 from twisted.python import log
-
-from spiral.entropy import nonceSource
 
 
 class DNSCurveBase32Encoder(object):
@@ -68,7 +68,7 @@ class DNSCurveDatagramProtocol(DNSDatagramProtocol):
         if pubkey is not None:
             log.msg('issuing DNSCurve query to', address, system='dnscurve')
             box = Box(self._key, pubkey)
-            nonce = nonceSource.squeeze(12)
+            nonce = os.urandom(12)
             query = (
                 'Q6fnvWj8'
                 + str(self._key.public_key)

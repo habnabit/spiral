@@ -3,6 +3,6 @@ import os
 from keccak import Sponge, SpongeRandom
 
 
-nonceSource = Sponge(1152, 448)
-nonceSource.absorb(os.urandom(64))
-random = SpongeRandom(nonceSource)
+sponge = Sponge(1152, 448)
+sponge.absorb(os.urandom(64))
+random = SpongeRandom(sponge)

@@ -5,7 +5,6 @@ from twisted.internet.protocol import DatagramProtocol
 from twisted.python import log
 
 from spiral.curvecp._libcurvecpr import C, ffi
-from spiral.entropy import nonceSource
 
 
 CLIENT_PENDING, CLIENT_INITIATING, CLIENT_NEGOTIATED = range(3)
@@ -16,7 +15,7 @@ NS = 1e9
 @ffi.callback('int(struct curvecpr_client_messager_glib *, unsigned char *, size_t)')
 def nextNonce(client, dest, num):
     print 'squeezing', num, 'bytes for', client, dest
-    ffi.buffer(dest, num)[:] = nonceSource.squeeze(num)
+    ffi.buffer(dest, num)[:] = os.urandom(num)
     return 0
 
 
