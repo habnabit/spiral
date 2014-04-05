@@ -1,7 +1,5 @@
 from twisted.internet import defer
 
-from nacl.public import PrivateKey
-
 from spiral.curvecp.pynacl.server import CurveCPServerDispatcher
 from spiral.curvecp.pynacl.transport import CurveCPClientTransport
 
