@@ -19,7 +19,7 @@ class CurveCPClientEndpoint(object):
         transport = CurveCPClientTransport(
             self.reactor, self.serverKey, fac, self.host, self.port,
             self.serverExtension, self.clientKey, self.clientExtension)
-        self.reactor.listenUDP(0, transport)
+        transport.listeningPort = self.reactor.listenUDP(0, transport)
         return transport.deferred
 
 

@@ -89,6 +89,7 @@ class _CurveCPBaseTransport(DatagramProtocol):
         self.theirStreamEnd = None
         self.reads = self.writes = None
         self.done = False
+        self.listeningPort = None
         self.outstandingMessages = 0
 
     def _timedOutHandshaking(self):
@@ -190,12 +191,12 @@ class _CurveCPBaseTransport(DatagramProtocol):
 
     def _checkBothResolutions(self):
         if self.reads == self.writes == 'closed' and not self.done:
-            self.protocol.connectionLost(Failure(e.resolution_map[self.theirResolution]))
+            self.protocol.connectionLost(Failure(e.resolution_map[self.theirResolution]()))
             self.cancel('message')
-            self.clock.callLater(sum(self.timeouts), self._completelyDone)
-
-    def _completelyDone(self):
-        self.done = True
+            if self.listeningPort:
+                self.listeningPort.stopListening()
+            # this used to be done on a callLater, but I can't remember why
+            self.done = True
 
     def sendAMessage(self, ack=None):
         now = self.now()
