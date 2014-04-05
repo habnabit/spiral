@@ -1,6 +1,10 @@
 __pycache__
 *.egg
 *.egg-info
+*.curvecpkey
 /.coverage
 /htmlcov
 /version.txt
+/dist
+/build
+/_trial_temp
