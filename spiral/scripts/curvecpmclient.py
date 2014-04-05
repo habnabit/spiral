@@ -17,11 +17,11 @@ class CurveCPMClientProcessProtocol(protocol.ProcessProtocol):
 
     def childDataReceived(self, fd, data):
         assert fd == 7
-        self.proto.transport.write(data).addErrback(log.err)
+        self.proto.transport.write(data).addErrback(log.err, 'error writing data')
 
     def childConnectionLost(self, fd):
         if fd == 7:
-            self.proto.transport.loseConnection().addErrback(log.err)
+            self.proto.transport.loseConnection().addErrback(log.err, 'error closing connection')
 
     def processEnded(self, status):
         self.proto.childProcessEnded = True
@@ -76,7 +76,12 @@ def twistedMain(reactor, args):
         clientKey=args.client_keydir,
         clientExtension=args.client_extension.decode('hex'))
     d = e.connect(fac)
-    d.addCallback(lambda proto: proto.deferred)
+
+    def gotProto(proto):
+        return proto.deferred
+
+    d.addCallback(gotProto)
+
     return d
 
 def main():

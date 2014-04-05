@@ -16,11 +16,11 @@ class CurveCPMServerProcessProtocol(protocol.ProcessProtocol):
 
     def childDataReceived(self, fd, data):
         assert fd == 1
-        self.proto.transport.write(data).addErrback(log.err)
+        self.proto.transport.write(data).addErrback(log.err, 'error writing data')
 
     def childConnectionLost(self, fd):
         if fd == 1:
-            self.proto.transport.loseConnection().addErrback(log.err)
+            self.proto.transport.loseConnection().addErrback(log.err, 'error closing connection')
 
 
 class CurveCPMServerProtocol(protocol.Protocol):
