@@ -75,7 +75,9 @@ def serverTransport(accumulatingFactory):
     clock = Clock()
     t = transport.CurveCPServerTransport(
         clock, FakeKeydir(serverLongKey), accumulatingFactory,
-        serverExtension + clientExtension + str(clientShortKey.public_key))
+        serverExtension + clientExtension + str(clientShortKey.public_key),
+        clientLongKey.public_key, clientHostPort, Box(serverShortKey, clientShortKey.public_key),
+        'example.com')
     return finishTransport(clock, t, serverShortKey)
 
 
@@ -104,11 +106,6 @@ serverCookie = (
 3Om0Fyt0peSIM/hRfSi0lLHOcFX4Gz+zhLbJF3m+YqzAmCDWILiE9iMsyv20okKSYIjWwk+H4Hik
 1xoH8Zlk69Qk5N3vgzJII1UKHzBgdVn4fQBaYqfn1EQ4SWUGFpd40Vxhbpa92pdBo7dnDYXysgV+
 by16d6hOYXs4s1rIsnHleo9J030w5D0z4Nui/Wt7""".decode('base64'))
-
-def test_serverCookie(serverTransport):
-    t = serverTransport
-    t.datagramReceived(clientHello, clientHostPort)
-    assert t.transport.written[0][0] == serverCookie
 
 
 clientInitiate = (
@@ -167,14 +164,6 @@ def test_handshakeTimeout_noResponse(clientTransport):
 def test_handshakeTimeout_noResponseAfterCookie(clientTransport):
     t = clientTransport
     t.datagramReceived(serverCookie, serverHostPort)
-    fired = []
-    t.deferred.addErrback(fired.append)
-    t.clock.pump([1, 1, 2, 3, 5, 8, 13])
-    assert fired[0].check(e.HandshakeTimeout)
-
-def test_handshakeTimeout_noResponseAfterHello(serverTransport):
-    t = serverTransport
-    t.datagramReceived(clientHello, clientHostPort)
     fired = []
     t.deferred.addErrback(fired.append)
     t.clock.pump([1, 1, 2, 3, 5, 8, 13])
@@ -246,8 +235,6 @@ def clientMessageTransport(clientTransport):
 @pytest.fixture
 def serverMessageTransport(serverTransport):
     serverTransport.congestion = FakeCongestion()
-    serverTransport.datagramReceived(clientHello, clientHostPort)
-    serverTransport.datagramReceived(clientNullInitiate, clientHostPort)
     return captureMessages(serverTransport)
 
 @pytest.fixture(scope='function', params=['client', 'server'])
@@ -373,16 +360,20 @@ def test_messagesSendToLastHost(serverMessageTransport):
     t = serverMessageTransport
     t.datagramReceived(clientNullMessage(1), clientHostPort)
     t.write('hi')
+    runUntilNext(t.clock)
     assert t.transport.written[0][1] == clientHostPort
     t.datagramReceived(clientNullMessage(2), clientHostPort2)
-    t.clock.advance(1)
+    runUntilNext(t.clock)
+    runUntilNext(t.clock)
     assert t.transport.written[1][1] == clientHostPort2
 
 def test_messagesSendToLastHostWithValidPackets(serverMessageTransport):
     t = serverMessageTransport
     t.datagramReceived(clientNullMessage(1), clientHostPort)
     t.write('hi')
+    runUntilNext(t.clock)
     assert t.transport.written[0][1] == clientHostPort
     t.datagramReceived('hi', clientHostPort2)
-    t.clock.advance(1)
+    runUntilNext(t.clock)
+    runUntilNext(t.clock)
     assert t.transport.written[1][1] == clientHostPort

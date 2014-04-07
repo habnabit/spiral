@@ -17,7 +17,7 @@ from twisted.python.failure import Failure
 import spiral.curvecp.errors as e
 from spiral.curvecp.address import CurveCPAddress
 from spiral.curvecp.keydir import EphemeralKey
-from spiral.curvecp.util import nameToDNS, dnsToName
+from spiral.curvecp.util import nameToDNS
 from spiral.curvecp.pynacl.chicago import Chicago
 from spiral.curvecp.pynacl.interval import halfOpen
 from spiral.curvecp.pynacl.message import Message, parseMessage
@@ -25,11 +25,8 @@ from spiral.util import MultiTimeout
 
 
 _nonceStruct = struct.Struct('<Q')
-_helloStruct = struct.Struct('<8x16x16x32x64x8s80s')
 _cookieStruct = struct.Struct('<8x16x16x16s144s')
 _cookieInnerStruct = struct.Struct('<32s96s')
-_initiateStruct = struct.Struct('<8x16x16x32x96s8s')
-_initiateInnerStruct = struct.Struct('<32s16s48s256s')
 _serverMessageStruct = struct.Struct('<8x16x16x8s')
 _clientMessageStruct = struct.Struct('<8x16x16x32x8s')
 
@@ -436,105 +433,44 @@ class CurveCPClientTransport(_CurveCPBaseTransport):
 
 
 class CurveCPServerTransport(_CurveCPBaseTransport):
-    def __init__(self, clock, serverKey, factory, clientID):
+    def __init__(self, clock, serverKey, factory, clientID, clientPubkey,
+                 peerHost, serverShortClientShort, serverDomain):
         _CurveCPBaseTransport.__init__(self, clock, serverKey, factory)
         self.serverExtension = clientID[:16]
         self.clientExtension = clientID[16:32]
-        self.clientKey = None
-        self._clientShortKey = PublicKey(clientID[32:64])
-        self.cookiePacket = None
-        self.awaiting = 'hello'
+        self._clientShortPubkey = PublicKey(clientID[32:64])
+        self.clientPubkey = clientPubkey
+        self.peerHost = peerHost
+        self._serverShortClientShort = serverShortClientShort
+        self.serverDomain = serverDomain
 
     messageMap = {
-        'QvnQ5XlH': 'hello',
-        'QvnQ5XlI': 'initiate',
         'QvnQ5XlM': 'message',
     }
     _nonceInfix = 'server'
 
     def startProtocol(self):
-        self._serverShortKey = self.generateKey()
-        self._longShortBox = Box(self.serverKey.key, self._clientShortKey)
-        self._shortShortBox = Box(self._serverShortKey, self._clientShortKey)
+        self.reschedule('message')
+        self._peerEstablished()
 
     def _serializeMessage(self, message):
         return (
             'RL3aNMXM'
             + self.clientExtension
             + self.serverExtension
-            + self._encryptForNonce('M', self._shortShortBox, message.pack()))
+            + self._encryptForNonce('M', self._serverShortClientShort, message.pack()))
 
     def _verifyPacketStart(self, data):
         return (data[8:24] == self.serverExtension
                 and data[24:40] == self.clientExtension
-                and data[40:72] == str(self._clientShortKey))
-
-    def datagram_hello(self, data, host_port):
-        if self.awaiting not in ('hello', 'initiate'):
-            return
-        if len(data) != _helloStruct.size or not self._verifyPacketStart(data):
-            return
-        nonce, encrypted = _helloStruct.unpack(data)
-        try:
-            self._longShortBox.decrypt(encrypted, 'CurveCP-client-H' + nonce)
-        except CryptoError:
-            return
-        self.peerHost = host_port
-        if self.awaiting == 'hello':
-            self.cookie = self.urandom(96)
-            boxData = str(self._serverShortKey.public_key) + self.cookie
-            cookieNonce = self.serverKey.nonce(longterm=True)
-            cookiePacket = (
-                'RL3aNMXK'
-                + self.clientExtension
-                + self.serverExtension
-                + cookieNonce
-                + self._longShortBox.encrypt(boxData, 'CurveCPK' + cookieNonce).ciphertext)
-            self.cookieMultiCall = self._retrySendingForHandshake(cookiePacket)
-            self.awaiting = 'initiate'
-        else:
-            self.cookieMultiCall.reset()
-
-    def datagram_initiate(self, data, host_port):
-        if self.awaiting not in ('initiate', 'message'):
-            return
-        cookie, nonce = _initiateStruct.unpack_from(data)
-        if cookie != self.cookie or not self._verifyPacketStart(data):
-            return
-        try:
-            decrypted = self._shortShortBox.decrypt(data[176:], 'CurveCP-client-I' + nonce)
-        except CryptoError:
-            return
-        clientKeyString, vouchNonce, encryptedVouch, serverDomain = _initiateInnerStruct.unpack_from(decrypted)
-        clientKey = PublicKey(clientKeyString)
-        longLongBox = Box(self.serverKey.key, clientKey)
-        try:
-            vouchKey = longLongBox.decrypt(encryptedVouch, 'CurveCPV' + vouchNonce)
-        except CryptoError:
-            return
-        if vouchKey != str(self._clientShortKey):
-            return
-        if self.clientKey is None:
-            self.clientKey = clientKey
-            self.serverDomain = dnsToName(serverDomain)
-            self.reschedule('message')
-            self._peerEstablished()
-        elif self.clientKey != clientKey:
-            return
-        self.peerHost = host_port
-        message = decrypted[352:]
-        self.parseMessage(self.now(), message)
-        if self.awaiting == 'initiate':
-            self.cookieMultiCall.cancel()
-            del self.cookieMultiCall
-            self.awaiting = 'message'
+                and data[40:72] == str(self._clientShortPubkey))
 
     def datagram_message(self, data, host_port):
         if not self._verifyPacketStart(data):
             return
         nonce, = _clientMessageStruct.unpack_from(data)
         try:
-            decrypted = self._shortShortBox.decrypt(data[80:], 'CurveCP-client-M' + nonce)
+            decrypted = self._serverShortClientShort.decrypt(data[80:], 'CurveCP-client-M' + nonce)
         except CryptoError:
             return
         if not self._verifyNonce(nonce):
@@ -551,4 +487,4 @@ class CurveCPServerTransport(_CurveCPBaseTransport):
     def getPeer(self):
         return CurveCPAddress(
             self.clientExtension, self.serverExtension, self.serverDomain,
-            self.clientKey, self.peerHost)
+            self.clientPubkey, self.peerHost)
