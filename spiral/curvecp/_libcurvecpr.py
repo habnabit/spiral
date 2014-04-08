@@ -1,82 +1,120 @@
-from cffi import FFI
+import os
 
-ffi = FFI()
-ffi.cdef("""
+from nacl.public import PrivateKey
+from twisted.internet.protocol import DatagramProtocol
+from twisted.python import log
 
-typedef uint64_t crypto_uint64;
+from spiral.curvecp._c_libcurvecpr import C, ffi
 
-struct curvecpr_client {
-    enum {
-        CURVECPR_CLIENT_PENDING,
-        CURVECPR_CLIENT_INITIATING,
-        CURVECPR_CLIENT_NEGOTIATED
-    } negotiated;
-    ...;
-};
 
-enum curvecpr_block_eofflag {
-    CURVECPR_BLOCK_STREAM,
-    CURVECPR_BLOCK_EOF_FAILURE,
-    CURVECPR_BLOCK_EOF_SUCCESS
-};
+CLIENT_PENDING, CLIENT_INITIATING, CLIENT_NEGOTIATED = range(3)
+BLOCK_STREAM, BLOCK_EOF_FAILURE, BLOCK_EOF_SUCCESS = range(3)
+NS = 1e9
 
-struct curvecpr_client_messager_glib;
 
-struct curvecpr_client_messager_glib_ops {
-    int (*send)(struct curvecpr_client_messager_glib *cmg, const unsigned char *buf, size_t num);
-    int (*recv)(struct curvecpr_client_messager_glib *cmg, const unsigned char *buf, size_t num);
-    void (*finished)(struct curvecpr_client_messager_glib *cmg, enum curvecpr_block_eofflag flag);
+@ffi.callback('int(struct curvecpr_client_messager_glib *, unsigned char *, size_t)')
+def nextNonce(client, dest, num):
+    print 'squeezing', num, 'bytes for', client, dest
+    ffi.buffer(dest, num)[:] = os.urandom(num)
+    return 0
 
-    int (*next_nonce)(struct curvecpr_client_messager_glib *cmg, unsigned char *destination, size_t num);
-};
 
-struct curvecpr_client_messager_glib_cf {
-    /* Any extensions. */
-    unsigned char my_extension[16];
+class CurveCPTransport(DatagramProtocol):
+    def __init__(self, reactor, host, port, serverKey, serverExtension, clientKey=None, clientExtension='\x00' * 16):
+        self.reactor = reactor
+        self.host = host
+        self.port = port
+        self.serverKey = serverKey
+        self.serverExtension = serverExtension
+        if clientKey is None:
+            clientKey = PrivateKey.generate()
+        self.clientKey = clientKey
+        self.clientExtension = clientExtension
+        self._funcs = []
+        self.setupClient()
+        self.delayedCall = None
 
-    /* Curve25519 public/private keypairs. */
-    unsigned char my_global_pk[32];
-    unsigned char my_global_sk[32];
+    def setupClient(self):
+        self.client = ffi.new('struct curvecpr_client_messager_glib *')
+        self.setupClientFunctions()
 
-    /* Server configuration. */
-    unsigned char their_extension[16];
-    unsigned char their_global_pk[32];
-    unsigned char their_domain_name[256];
+        self.client_cf.pending_maximum = 2 ** 32
+        self.client_cf.sendmarkq_maximum = 2 ** 16
+        self.client_cf.recvmarkq_maximum = 2 ** 16
 
-    /* Messager configuration. */
-    crypto_uint64 pending_maximum;
-    unsigned int sendmarkq_maximum;
-    unsigned int recvmarkq_maximum;
+        self.client_cf[0].my_extension = self.clientExtension
+        self.client_cf[0].my_global_pk = str(self.clientKey.public_key)
+        self.client_cf[0].my_global_sk = str(self.clientKey)
 
-    struct curvecpr_client_messager_glib_ops ops;
+        self.client_cf[0].their_extension = self.serverExtension
+        self.client_cf[0].their_global_pk = str(self.serverKey)
+        C.curvecpr_util_encode_domain_name(self.client_cf[0].their_domain_name, 'example.com')
 
-    void *priv;
-};
+        C.curvecpr_client_messager_glib_new(self.client, self.client_cf)
 
-struct curvecpr_client_messager_glib {
-    struct curvecpr_client_messager_glib_cf cf;
-    struct curvecpr_client client;
-    ...;
-};
+    def setupClientFunctions(self):
+        self.client_cf = ffi.new('struct curvecpr_client_messager_glib_cf *')
 
-void curvecpr_client_messager_glib_new (struct curvecpr_client_messager_glib *cmg, struct curvecpr_client_messager_glib_cf *cf);
-void curvecpr_client_messager_glib_dealloc (struct curvecpr_client_messager_glib *cmg);
-int curvecpr_client_messager_glib_connected (struct curvecpr_client_messager_glib *cmg);
-int curvecpr_client_messager_glib_send (struct curvecpr_client_messager_glib *cmg, const unsigned char *buf, size_t num);
-int curvecpr_client_messager_glib_recv (struct curvecpr_client_messager_glib *cmg, const unsigned char *buf, size_t num);
-unsigned char curvecpr_client_messager_glib_is_finished (struct curvecpr_client_messager_glib *cmg);
-int curvecpr_client_messager_glib_finish (struct curvecpr_client_messager_glib *cmg);
-int curvecpr_client_messager_glib_process_sendq (struct curvecpr_client_messager_glib *cmg);
-long long curvecpr_client_messager_glib_next_timeout (struct curvecpr_client_messager_glib *cmg);
+        @ffi.callback('int(struct curvecpr_client_messager_glib *, const unsigned char *, size_t)')
+        def send(client, buf, num):
+            print 'writing', num, 'bytes'
+            try:
+                self.transport.write(ffi.buffer(buf, num)[:], (self.host, self.port))
+            except Exception:
+                log.err(None, 'error sending curvecp datagram')
+                return -1
+            else:
+                return 0
 
-int curvecpr_util_encode_domain_name (unsigned char *destination, const char *source);
+        self._funcs.append(send)
 
-""")
+        @ffi.callback('int(struct curvecpr_client_messager_glib *, const unsigned char *, size_t)')
+        def recv(client, buf, num):
+            print 'got', num, 'bytes', `ffi.buffer(buf, num)[:]`
+            return 0
 
-C = ffi.verify("""
+        self._funcs.append(recv)
 
-#include "sodium/crypto_uint64.h"
-#include "curvecpr.h"
-#include "curvecpr_glib.h"
+        @ffi.callback('void(struct curvecpr_client_messager_glib *, enum curvecpr_block_eofflag)')
+        def finished(client, flag):
+            print 'finished', flag
+            C.curvecpr_client_messager_glib_finish(self.client)
 
-""", libraries=['curvecpr', 'curvecpr-glib'])
+        self._funcs.append(finished)
+
+        self.client_cf = ffi.new('struct curvecpr_client_messager_glib_cf *', {
+            'ops': {
+                'send': send,
+                'recv': recv,
+                'finished': finished,
+                'next_nonce': nextNonce,
+            },
+        })
+
+    def startProtocol(self):
+        C.curvecpr_client_messager_glib_connected(self.client)
+
+    def datagramReceived(self, data, host_port):
+        print 'got', len(data), 'bytes'
+        C.curvecpr_client_messager_glib_recv(self.client, data, len(data))
+        if self.client[0].client.negotiated != CLIENT_PENDING:
+            self._processSendQ()
+
+    def write(self, data):
+        ret = C.curvecpr_client_messager_glib_send(self.client, data, len(data))
+        if ret:
+            print os.strerror(-ret)
+        self.reschedule()
+
+    def _processSendQ(self):
+        if self.client[0].client.negotiated != CLIENT_PENDING:
+            C.curvecpr_client_messager_glib_process_sendq(self.client)
+        self.reschedule()
+
+    def reschedule(self):
+        nextActionIn = C.curvecpr_client_messager_glib_next_timeout(self.client) / NS
+        if self.delayedCall is not None and self.delayedCall.active():
+            self.delayedCall.reset(nextActionIn)
+        else:
+            self.delayedCall = self.reactor.callLater(
+                nextActionIn, self._processSendQ)

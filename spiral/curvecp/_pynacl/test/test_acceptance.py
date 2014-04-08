@@ -7,8 +7,8 @@ from twisted.internet.utils import getProcessOutput
 from twisted.internet import defer, protocol
 from twisted.trial import unittest
 
+from spiral.curvecp._pynacl import endpoints
 from spiral.curvecp.errors import CurveCPConnectionDone
-from spiral.curvecp.pynacl import endpoints
 from spiral.curvecp.keydir import EphemeralKey
 
 

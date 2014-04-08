@@ -7,7 +7,7 @@ from nacl.secret import SecretBox
 from twisted.internet.protocol import DatagramProtocol
 from twisted.python import log
 
-from spiral.curvecp.pynacl.transport import CurveCPServerTransport
+from spiral.curvecp._pynacl.transport import CurveCPServerTransport
 from spiral.curvecp.util import dnsToName
 
 

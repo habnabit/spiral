@@ -7,11 +7,11 @@ from twisted.internet.protocol import Factory
 from twisted.internet.task import Clock
 from twisted.test.proto_helpers import AccumulatingProtocol, FakeDatagramTransport
 
-import spiral.curvecp.errors as e
-from spiral.curvecp.pynacl import transport
-from spiral.curvecp.pynacl.interval import halfOpen
-from spiral.curvecp.pynacl.message import Message
-from spiral.curvecp.pynacl.test.util import runUntilNext, nextCallIn
+from spiral.curvecp import errors as e
+from spiral.curvecp._pynacl import transport
+from spiral.curvecp._pynacl.interval import halfOpen
+from spiral.curvecp._pynacl.message import Message
+from spiral.curvecp._pynacl.test.util import runUntilNext, nextCallIn
 
 
 nonceStruct = struct.Struct('<Q')

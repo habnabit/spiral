@@ -1,7 +1,7 @@
 import pytest
 
-from spiral.curvecp.pynacl.message import Message
-from spiral.curvecp.pynacl.interval import halfOpen
+from spiral.curvecp._pynacl.message import Message
+from spiral.curvecp._pynacl.interval import halfOpen
 
 
 messagePackPairs = [

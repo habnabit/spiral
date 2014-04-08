@@ -1,7 +1,7 @@
 from twisted.internet import defer
 
-from spiral.curvecp.pynacl.server import CurveCPServerDispatcher
-from spiral.curvecp.pynacl.transport import CurveCPClientTransport
+from spiral.curvecp._pynacl.server import CurveCPServerDispatcher
+from spiral.curvecp._pynacl.transport import CurveCPClientTransport
 
 
 class CurveCPClientEndpoint(object):

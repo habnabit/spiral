@@ -2,10 +2,9 @@ import collections
 import itertools
 import struct
 
-import interval
 from parsley import makeGrammar
 
-from spiral.curvecp.pynacl.interval import halfOpen
+from spiral.curvecp._pynacl.interval import halfOpen
 
 
 _uint16 = struct.Struct('<H')

@@ -3,9 +3,7 @@ from __future__ import division, absolute_import
 import bisect
 import collections
 import heapq
-import os
 import struct
-import time
 
 from interval import IntervalSet
 from nacl.exceptions import CryptoError
@@ -14,13 +12,13 @@ from twisted.internet import defer
 from twisted.internet.protocol import DatagramProtocol
 from twisted.python.failure import Failure
 
-import spiral.curvecp.errors as e
+from spiral.curvecp import errors as e
 from spiral.curvecp.address import CurveCPAddress
 from spiral.curvecp.keydir import EphemeralKey
 from spiral.curvecp.util import nameToDNS
-from spiral.curvecp.pynacl.chicago import Chicago
-from spiral.curvecp.pynacl.interval import halfOpen
-from spiral.curvecp.pynacl.message import Message, parseMessage
+from spiral.curvecp._pynacl.chicago import Chicago
+from spiral.curvecp._pynacl.interval import halfOpen
+from spiral.curvecp._pynacl.message import Message, parseMessage
 from spiral.util import MultiTimeout
 
 
