@@ -21,7 +21,7 @@ class CurveCPClientEndpoint(object):
             self.serverExtension, self.clientKey, self.clientExtension)
         listeningPort = self.reactor.listenUDP(0, transport)
         transport.notifyFinish().addCallback(self._clientFinished, listeningPort)
-        return transport.deferred
+        return transport._deferred
 
     def _clientFinished(self, ign, listeningPort):
         listeningPort.stopListening()

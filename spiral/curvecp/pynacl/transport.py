@@ -57,58 +57,59 @@ def showMessage(tag, message, sentAt=None):
 
 class _CurveCPBaseTransport(DatagramProtocol):
     timeouts = 1, 1, 2, 3, 5, 8, 13
-    now = staticmethod(time.time)
-    generateKey = staticmethod(PrivateKey.generate)
-    generateKeydir = staticmethod(EphemeralKey)
-    urandom = staticmethod(os.urandom)
+    _generateKey = staticmethod(PrivateKey.generate)
+    _generateKeydir = staticmethod(EphemeralKey)
 
     def __init__(self, clock, serverKey, factory):
-        self.clock = clock
-        self.serverKey = serverKey
-        self.factory = factory
+        self._clock = clock
+        self._serverKey = serverKey
+        self._factory = factory
         self._received = IntervalSet()
         self._weAcked = IntervalSet()
         self._sent = IntervalSet()
         self._theyAcked = IntervalSet()
-        self.sentMessages = set()
-        self.previousID = 0
-        self.fragment = []
-        self.congestion = Chicago()
-        self.sentMessageAt = {}
-        self.delayedCalls = {}
-        self.messageQueue = []
-        self.enqueuedMessages = set()
-        self.deferred = defer.Deferred()
+        self._sentMessages = set()
+        self._previousID = 0
+        self._fragment = []
+        self._congestion = Chicago()
+        self._sentMessageAt = {}
+        self._delayedCalls = {}
+        self._messageQueue = []
+        self._enqueuedMessages = set()
+        self._deferred = defer.Deferred()
         self._nonce = 0
         self._theirLastNonce = 0
-        self.counter = 1
-        self.ourStreamEnd = None
-        self.theirStreamEnd = None
-        self.reads = self.writes = None
-        self.done = False
-        self.outstandingMessages = 0
+        self._counter = 1
+        self._ourStreamEnd = None
+        self._theirStreamEnd = None
+        self._reads = self._writes = None
+        self._done = False
+        self._outstandingMessages = 0
         self._onDone = []
 
+    def _now(self):
+        return self._clock.seconds()
+
     def _timedOutHandshaking(self):
-        self.deferred.errback(e.HandshakeTimeout())
+        self._deferred.errback(e.HandshakeTimeout())
 
     def _write(self, data):
-        self.transport.write(data, self.peerHost)
+        self.transport.write(data, self._peerHost)
 
     def _retrySendingForHandshake(self, data):
         mt = MultiTimeout(
-            self.clock, self.timeouts, self._timedOutHandshaking, self._write, data)
+            self._clock, self.timeouts, self._timedOutHandshaking, self._write, data)
         mt.reset()
         return mt
 
     messageMap = {}
     def datagramReceived(self, data, host_port):
-        if self.done:
+        if self._done:
             return
-        handler = self.messageMap.get(data[:8])
+        handler = self._messageMap.get(data[:8])
         if not handler:
             return
-        meth = getattr(self, 'datagram_' + handler)
+        meth = getattr(self, '_datagram_' + handler)
         meth(data, host_port)
 
     _nonceInfix = ''
@@ -127,38 +128,38 @@ class _CurveCPBaseTransport(DatagramProtocol):
     def _serializeMessage(self, message):
         return ''
 
-    def sendMessage(self, message):
+    def _sendMessage(self, message):
         packet = self._serializeMessage(message)
         self._write(packet)
         if message.id:
-            self.sentMessageAt[message.id] = self.congestion.lastSentAt = self.now()
+            self._sentMessageAt[message.id] = self._congestion.lastSentAt = self._now()
         self._weAcked.update(message.ranges)
 
-    def parseMessage(self, now, message):
+    def _parseMessage(self, now, message):
         message = parseMessage(message)
 
-        sentAt = self.sentMessageAt.pop(message.previousID, None)
+        sentAt = self._sentMessageAt.pop(message.previousID, None)
         if sentAt is not None:
-            self.congestion.processDelta(now, now - sentAt)
+            self._congestion.processDelta(now, now - sentAt)
         if message.id:
-            self.clock.callLater(0, self.sendAMessage, ack=message.id)
+            self._clock.callLater(0, self._sendAMessage, ack=message.id)
         self._theyAcked.update(message.ranges)
 
-        for qd in list(self.sentMessages):
+        for qd in list(self._sentMessages):
             if qd.interval & self._theyAcked:
                 qd.interval.difference_update(self._theyAcked)
                 if not qd.interval:
                     for d in qd.deferreds:
                         d.callback(now)
-                    self.cancel(qd)
-                    self.outstandingMessages -= 1
-                    self.sentMessages.remove(qd)
+                    self._cancel(qd)
+                    self._outstandingMessages -= 1
+                    self._sentMessages.remove(qd)
 
-        if message.resolution and self.theirStreamEnd is None:
-            self.theirStreamEnd = message.dataPos
-            self.theirResolution = message.resolution
+        if message.resolution and self._theirStreamEnd is None:
+            self._theirStreamEnd = message.dataPos
+            self._theirResolution = message.resolution
             self._received.add(halfOpen(message.dataPos, message.dataPos + 1))
-            self.reads = 'closing'
+            self._reads = 'closing'
             self._checkTheirResolution()
             return
         elif not message.data:
@@ -169,45 +170,45 @@ class _CurveCPBaseTransport(DatagramProtocol):
             return
         self._received.add(i)
         newData = message.data[new.lower_bound() - i.lower_bound:new.upper_bound() - i.upper_bound or None]
-        bisect.insort(self.fragment, (i.lower_bound, newData))
+        bisect.insort(self._fragment, (i.lower_bound, newData))
         if len(self._received) > 1 or self._received.lower_bound() != 0:
             return
-        newData = ''.join([d for _, d in self.fragment])
-        self.protocol.dataReceived(newData)
-        self.fragment = []
+        newData = ''.join([d for _, d in self._fragment])
+        self._protocol.dataReceived(newData)
+        self._fragment = []
         self._checkTheirResolution()
 
     def _checkTheirResolution(self):
-        if self.theirStreamEnd is None:
+        if self._theirStreamEnd is None:
             return
         if len(self._received) != 1 or self._received.lower_bound() != 0:
             return
-        self.reads = 'closed'
-        self.protocol.readConnectionLost()
+        self._reads = 'closed'
+        self._protocol.readConnectionLost()
         self._checkBothResolutions()
 
     def notifyFinish(self):
-        if self.done:
+        if self._done:
             return defer.succeed(None)
         d = defer.Deferred()
         self._onDone.append(d)
         return d
 
     def _checkBothResolutions(self):
-        if self.reads == self.writes == 'closed' and not self.done:
-            self.protocol.connectionLost(Failure(e.resolution_map[self.theirResolution]()))
-            self.cancel('message')
+        if self._reads == self._writes == 'closed' and not self._done:
+            self._protocol.connectionLost(Failure(e.resolution_map[self._theirResolution]()))
+            self._cancel('message')
             deferreds, self._onDone = self._onDone, None
             for d in deferreds:
                 d.callback(None)
             # this used to be done on a callLater, but I can't remember why
-            self.done = True
+            self._done = True
 
-    def sendAMessage(self, ack=None):
-        now = self.now()
+    def _sendAMessage(self, ack=None):
+        now = self._now()
         nextActionIn = None
         message = Message(
-            id=self.counter,
+            id=self._counter,
             previousID=0,
             ranges=list(self._received)[:6],
             resolution=None,
@@ -217,70 +218,69 @@ class _CurveCPBaseTransport(DatagramProtocol):
 
         if ack is not None:
             message = message._replace(id=0, previousID=ack)
-        elif self.messageQueue:
-            _, _, qd = heapq.heappop(self.messageQueue)
-            self.enqueuedMessages.remove(qd)
+        elif self._messageQueue:
+            _, _, qd = heapq.heappop(self._messageQueue)
+            self._enqueuedMessages.remove(qd)
             message = qd.fillInMessage(message)
-            self.counter += 1
-            now = self.now()
+            self._counter += 1
             if qd.sentAt:
-                self.congestion.timedOut(now)
-                self.sentMessageAt.pop(qd.messageIDs[-1], None)
-            elif self.congestion.window is not None and self.outstandingMessages > self.congestion.window:
-                self.enqueue(1, qd)
+                self._congestion.timedOut(now)
+                self._sentMessageAt.pop(qd.messageIDs[-1], None)
+            elif self._congestion.window is not None and self._outstandingMessages > self._congestion.window:
+                self._enqueue(1, qd)
                 return
             else:
-                self.outstandingMessages += 1
+                self._outstandingMessages += 1
             qd.sentAt.append(now)
             qd.messageIDs.append(message.id)
-            self.sentMessages.add(qd)
-            self.reschedule(qd)
+            self._sentMessages.add(qd)
+            self._reschedule(qd)
         else:
             return 60
 
-        self.sendMessage(message)
+        self._sendMessage(message)
         return nextActionIn
 
-    def reschedule(self, what, nextActionIn=None):
-        now = self.now()
+    def _reschedule(self, what, nextActionIn=None):
+        now = self._now()
         if nextActionIn is None:
             if what == 'message':
-                nextActionIn = self.congestion.nextMessageIn(now)
+                nextActionIn = self._congestion.nextMessageIn(now)
             else:
-                nextActionIn = self.congestion.nextTimeoutIn(now, what)
-        delayedCall = self.delayedCalls.get(what)
+                nextActionIn = self._congestion.nextTimeoutIn(now, what)
+        delayedCall = self._delayedCalls.get(what)
         if delayedCall is not None and delayedCall.active():
             delayedCall.reset(nextActionIn)
         else:
-            self.delayedCalls[what] = self.clock.callLater(
+            self._delayedCalls[what] = self._clock.callLater(
                 nextActionIn, self._scheduledAction, what)
 
-    def cancel(self, what):
-        delayedCall = self.delayedCalls.pop(what, None)
+    def _cancel(self, what):
+        delayedCall = self._delayedCalls.pop(what, None)
         if delayedCall is not None and delayedCall.active():
             delayedCall.cancel()
 
     def _scheduledAction(self, what):
         nextActionIn = None
         if what == 'message':
-            nextActionIn = self.sendAMessage()
-            self.reschedule(what, nextActionIn=nextActionIn)
+            nextActionIn = self._sendAMessage()
+            self._reschedule(what, nextActionIn=nextActionIn)
         else:
-            self.sentMessages.remove(what)
+            self._sentMessages.remove(what)
             if what.interval:
-                self.enqueue(0, what)
+                self._enqueue(0, what)
 
-    def enqueue(self, priority, *data):
-        self.reschedule('message')
+    def _enqueue(self, priority, *data):
+        self._reschedule('message')
         for datum in data:
-            if datum not in self.enqueuedMessages and datum.interval:
-                heapq.heappush(self.messageQueue, (priority, datum.lowerBound, datum))
-                self.enqueuedMessages.add(datum)
+            if datum not in self._enqueuedMessages and datum.interval:
+                heapq.heappush(self._messageQueue, (priority, datum.lowerBound, datum))
+                self._enqueuedMessages.add(datum)
 
     def write(self, data):
         if not data:
             return defer.succeed(None)
-        elif self.writes in ('closing', 'closed'):
+        elif self._writes in ('closing', 'closed'):
             return defer.fail(e.CurveCPConnectionDone(
                 'attempted a write after closing writes'))
 
@@ -298,29 +298,29 @@ class _CurveCPBaseTransport(DatagramProtocol):
             data = data[1024:]
             qds.append(qd)
         ds.append(d)
-        self.enqueue(1, *qds)
+        self._enqueue(1, *qds)
         return d
 
     def _peerEstablished(self):
-        self.protocol = self.factory.buildProtocol(self.getPeer())
-        self.protocol.makeConnection(self)
-        self.deferred.callback(self.protocol)
-        self.reads = 'open'
-        self.writes = 'open'
+        self._protocol = self._factory.buildProtocol(self.getPeer())
+        self._protocol.makeConnection(self)
+        self._deferred.callback(self._protocol)
+        self._reads = 'open'
+        self._writes = 'open'
 
     def _doneWritingAcked(self, when):
-        self.writes = 'closed'
+        self._writes = 'closed'
         self._checkBothResolutions()
         return when
 
     def loseConnection(self, success=True):
         d = defer.Deferred()
         d.addCallback(self._doneWritingAcked)
-        streamEnd = self.ourStreamEnd = self._sent.upper_bound() if self._sent else 0
-        resolution = self.ourResolution = 'success' if success else 'failure'
+        streamEnd = self._ourStreamEnd = self._sent.upper_bound() if self._sent else 0
+        resolution = self._ourResolution = 'success' if success else 'failure'
         interval = IntervalSet([halfOpen(streamEnd, streamEnd + 1)])
-        self.enqueue(1, QueuedResolution(interval, streamEnd, [d], [], [], resolution))
-        self.writes = 'closing'
+        self._enqueue(1, QueuedResolution(interval, streamEnd, [d], [], [], resolution))
+        self._writes = 'closing'
         return d
 
 
@@ -328,16 +328,16 @@ class CurveCPClientTransport(_CurveCPBaseTransport):
     def __init__(self, clock, serverKey, factory, host, port,
                  serverExtension, clientKey=None, clientExtension='\x00' * 16):
         _CurveCPBaseTransport.__init__(self, clock, serverKey, factory)
-        self.peerHost = host, port
-        self.serverDomain = host
-        self.serverExtension = serverExtension
+        self._peerHost = host, port
+        self._serverDomain = host
+        self._serverExtension = serverExtension
         if clientKey is None:
-            clientKey = self.generateKeydir()
-        self.clientKey = clientKey
-        self.clientExtension = clientExtension
-        self.awaiting = 'cookie'
+            clientKey = self._generateKeydir()
+        self._clientKey = clientKey
+        self._clientExtension = clientExtension
+        self._awaiting = 'cookie'
 
-    messageMap = {
+    _messageMap = {
         'RL3aNMXK': 'cookie',
         'RL3aNMXM': 'message',
     }
@@ -346,28 +346,28 @@ class CurveCPClientTransport(_CurveCPBaseTransport):
     def _serializeMessage(self, message):
         return (
             'QvnQ5XlM'
-            + self.serverExtension
-            + self.clientExtension
+            + self._serverExtension
+            + self._clientExtension
             + str(self._clientShortKey.public_key)
             + self._encryptForNonce('M', self._shortShortBox, message.pack()))
 
     def startProtocol(self):
-        self._clientShortKey = self.generateKey()
-        self._shortLongBox = Box(self._clientShortKey, self.serverKey)
+        self._clientShortKey = self._generateKey()
+        self._shortLongBox = Box(self._clientShortKey, self._serverKey)
         packet = (
             'QvnQ5XlH'
-            + self.serverExtension
-            + self.clientExtension
+            + self._serverExtension
+            + self._clientExtension
             + str(self._clientShortKey.public_key)
             + '\0' * 64
             + self._encryptForNonce('H', self._shortLongBox, '\0' * 64))
-        self.helloMultiCall = self._retrySendingForHandshake(packet)
+        self._helloMultiCall = self._retrySendingForHandshake(packet)
 
     def _verifyPacketStart(self, data):
-        return (data[8:24] == self.clientExtension
-                and data[24:40] == self.serverExtension)
+        return (data[8:24] == self._clientExtension
+                and data[24:40] == self._serverExtension)
 
-    def datagram_cookie(self, data, host_port):
+    def _datagram_cookie(self, data, host_port):
         if len(data) != _cookieStruct.size or not self._verifyPacketStart(data):
             return
         nonce, encrypted = _cookieStruct.unpack(data)
@@ -377,38 +377,38 @@ class CurveCPClientTransport(_CurveCPBaseTransport):
             return
         serverShortKeyString, cookie = _cookieInnerStruct.unpack(decrypted)
         serverShortKey = PublicKey(serverShortKeyString)
-        if self.awaiting != 'cookie' and (cookie != self._cookie or serverShortKey != self._serverShortKey):
+        if self._awaiting != 'cookie' and (cookie != self._cookie or serverShortKey != self._serverShortKey):
             return
 
-        self.peerHost = host_port
-        if self.awaiting == 'cookie':
+        self._peerHost = host_port
+        if self._awaiting == 'cookie':
             self._cookie = cookie
             self._serverShortKey = serverShortKey
             self._shortShortBox = Box(self._clientShortKey, self._serverShortKey)
             message = '\1\0\0\0\0\0\0\0' + '\0' * 184
-            longLongNonce = self.clientKey.nonce()
-            longLongBox = Box(self.clientKey.key, self.serverKey)
+            longLongNonce = self._clientKey.nonce()
+            longLongBox = Box(self._clientKey.key, self._serverKey)
             initiatePacketContent = (
-                str(self.clientKey.key.public_key)
+                str(self._clientKey.key.public_key)
                 + longLongNonce
                 + longLongBox.encrypt(str(self._clientShortKey.public_key), 'CurveCPV' + longLongNonce).ciphertext
-                + nameToDNS(self.serverDomain)
+                + nameToDNS(self._serverDomain)
                 + message)
             initiatePacket = (
                 'QvnQ5XlI'
-                + self.serverExtension
-                + self.clientExtension
+                + self._serverExtension
+                + self._clientExtension
                 + str(self._clientShortKey.public_key)
                 + self._cookie
                 + self._encryptForNonce('I', self._shortShortBox, initiatePacketContent))
-            self.helloMultiCall.cancel()
-            self.initiateMultiCall = self._retrySendingForHandshake(initiatePacket)
-            self.awaiting = 'first-message'
+            self._helloMultiCall.cancel()
+            self._initiateMultiCall = self._retrySendingForHandshake(initiatePacket)
+            self._awaiting = 'first-message'
         else:
-            self.initiateMultiCall.reset()
+            self._initiateMultiCall.reset()
 
-    def datagram_message(self, data, host_port):
-        if self.awaiting not in ('first-message', 'message'):
+    def _datagram_message(self, data, host_port):
+        if self._awaiting not in ('first-message', 'message'):
             return
         if not self._verifyPacketStart(data):
             return
@@ -419,61 +419,61 @@ class CurveCPClientTransport(_CurveCPBaseTransport):
             return
         if not self._verifyNonce(nonce):
             return
-        if self.awaiting == 'first-message':
-            self.initiateMultiCall.cancel()
-            del self.initiateMultiCall
-            del self.helloMultiCall
-            self.awaiting = 'message'
-            self.reschedule('message')
+        if self._awaiting == 'first-message':
+            self._initiateMultiCall.cancel()
+            del self._initiateMultiCall
+            del self._helloMultiCall
+            self._awaiting = 'message'
+            self._reschedule('message')
             self._peerEstablished()
-        self.parseMessage(self.now(), decrypted)
+        self._parseMessage(self._now(), decrypted)
 
     def getHost(self):
         host = self.transport.getHost()
         return CurveCPAddress(
-            self.clientExtension, self.serverExtension, self.serverDomain,
-            self.clientKey.key.public_key, (host.host, host.port))
+            self._clientExtension, self._serverExtension, self._serverDomain,
+            self._clientKey.key.public_key, (host.host, host.port))
 
     def getPeer(self):
         return CurveCPAddress(
-            self.clientExtension, self.serverExtension, self.serverDomain,
-            self.serverKey, self.peerHost)
+            self._clientExtension, self._serverExtension, self._serverDomain,
+            self._serverKey, self._peerHost)
 
 
 class CurveCPServerTransport(_CurveCPBaseTransport):
     def __init__(self, clock, serverKey, factory, clientID, clientPubkey,
                  peerHost, serverShortClientShort, serverDomain):
         _CurveCPBaseTransport.__init__(self, clock, serverKey, factory)
-        self.serverExtension = clientID[:16]
-        self.clientExtension = clientID[16:32]
+        self._serverExtension = clientID[:16]
+        self._clientExtension = clientID[16:32]
         self._clientShortPubkey = PublicKey(clientID[32:64])
-        self.clientPubkey = clientPubkey
-        self.peerHost = peerHost
+        self._clientPubkey = clientPubkey
+        self._peerHost = peerHost
         self._serverShortClientShort = serverShortClientShort
-        self.serverDomain = serverDomain
+        self._serverDomain = serverDomain
 
-    messageMap = {
+    _messageMap = {
         'QvnQ5XlM': 'message',
     }
     _nonceInfix = 'server'
 
     def startProtocol(self):
-        self.reschedule('message')
+        self._reschedule('message')
         self._peerEstablished()
 
     def _serializeMessage(self, message):
         return (
             'RL3aNMXM'
-            + self.clientExtension
-            + self.serverExtension
+            + self._clientExtension
+            + self._serverExtension
             + self._encryptForNonce('M', self._serverShortClientShort, message.pack()))
 
     def _verifyPacketStart(self, data):
-        return (data[8:24] == self.serverExtension
-                and data[24:40] == self.clientExtension
+        return (data[8:24] == self._serverExtension
+                and data[24:40] == self._clientExtension
                 and data[40:72] == str(self._clientShortPubkey))
 
-    def datagram_message(self, data, host_port):
+    def _datagram_message(self, data, host_port):
         if not self._verifyPacketStart(data):
             return
         nonce, = _clientMessageStruct.unpack_from(data)
@@ -483,16 +483,16 @@ class CurveCPServerTransport(_CurveCPBaseTransport):
             return
         if not self._verifyNonce(nonce):
             return
-        self.peerHost = host_port
-        self.parseMessage(self.now(), decrypted)
+        self._peerHost = host_port
+        self._parseMessage(self._now(), decrypted)
 
     def getHost(self):
         host = self.transport.getHost()
         return CurveCPAddress(
-            self.clientExtension, self.serverExtension, self.serverDomain,
-            self.serverKey.key.public_key, (host.host, host.port))
+            self._clientExtension, self._serverExtension, self._serverDomain,
+            self._serverKey.key.public_key, (host.host, host.port))
 
     def getPeer(self):
         return CurveCPAddress(
-            self.clientExtension, self.serverExtension, self.serverDomain,
-            self.clientPubkey, self.peerHost)
+            self._clientExtension, self._serverExtension, self._serverDomain,
+            self._clientPubkey, self._peerHost)

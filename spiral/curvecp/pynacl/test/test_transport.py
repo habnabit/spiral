@@ -41,10 +41,8 @@ class FakeKeydir(object):
 
 
 def finishTransport(clock, t, key):
-    t.generateKey = lambda: key
-    t.generateKeydir = lambda: FakeKeydir(key)
-    t.now = clock.seconds
-    t.urandom = lambda n: '\0' * n
+    t._generateKey = lambda: key
+    t._generateKeydir = lambda: FakeKeydir(key)
     t.makeConnection(FakeDatagramTransport())
     return t
 
@@ -157,16 +155,16 @@ def test_clientInitiate(clientTransport):
 def test_handshakeTimeout_noResponse(clientTransport):
     t = clientTransport
     fired = []
-    t.deferred.addErrback(fired.append)
-    t.clock.pump([1, 1, 2, 3, 5, 8, 13])
+    t._deferred.addErrback(fired.append)
+    t._clock.pump([1, 1, 2, 3, 5, 8, 13])
     assert fired[0].check(e.HandshakeTimeout)
 
 def test_handshakeTimeout_noResponseAfterCookie(clientTransport):
     t = clientTransport
     t.datagramReceived(serverCookie, serverHostPort)
     fired = []
-    t.deferred.addErrback(fired.append)
-    t.clock.pump([1, 1, 2, 3, 5, 8, 13])
+    t._deferred.addErrback(fired.append)
+    t._clock.pump([1, 1, 2, 3, 5, 8, 13])
     assert fired[0].check(e.HandshakeTimeout)
 
 
@@ -217,24 +215,24 @@ class FakeCongestion(object):
 
 
 def captureMessages(t):
-    _sendMessage = t.sendMessage
+    _sendMessage = t._sendMessage
     def capture(message):
         _sendMessage(message)
         capture.captured.append(message)
     capture.captured = []
-    t.sendMessage = capture
+    t._sendMessage = capture
     return t
 
 @pytest.fixture
 def clientMessageTransport(clientTransport):
-    clientTransport.congestion = FakeCongestion()
+    clientTransport._congestion = FakeCongestion()
     clientTransport.datagramReceived(serverCookie, serverHostPort)
     clientTransport.datagramReceived(serverNullMessage(), serverHostPort)
     return captureMessages(clientTransport)
 
 @pytest.fixture
 def serverMessageTransport(serverTransport):
-    serverTransport.congestion = FakeCongestion()
+    serverTransport._congestion = FakeCongestion()
     return captureMessages(serverTransport)
 
 @pytest.fixture(scope='function', params=['client', 'server'])
@@ -244,15 +242,15 @@ def messageTransport(clientMessageTransport, serverMessageTransport, request):
 
 def test_ack(messageTransport):
     t = messageTransport
-    t.parseMessage(t.now(), Message(1, 0, [], None, 0, 'hi').pack())
-    runUntilNext(t.clock)
-    assert t.sendMessage.captured[0] == Message(0, 1, [halfOpen(0, 2)], None, 0, '')
+    t._parseMessage(t._now(), Message(1, 0, [], None, 0, 'hi').pack())
+    runUntilNext(t._clock)
+    assert t._sendMessage.captured[0] == Message(0, 1, [halfOpen(0, 2)], None, 0, '')
 
 def test_sendingData(messageTransport):
     t = messageTransport
     t.write('hi')
-    runUntilNext(t.clock)
-    assert t.sendMessage.captured[0] == Message(1, 0, [], None, 0, 'hi')
+    runUntilNext(t._clock)
+    assert t._sendMessage.captured[0] == Message(1, 0, [], None, 0, 'hi')
 
 def test_writeDeferredFires(messageTransport):
     t = messageTransport
@@ -260,9 +258,9 @@ def test_writeDeferredFires(messageTransport):
     fired = []
     d.addCallback(fired.append)
     assert not fired
-    runUntilNext(t.clock)
-    t.parseMessage(t.now(), Message(0, 1, [halfOpen(0, 2)], None, 0, '').pack())
-    assert fired[0] == t.now()
+    runUntilNext(t._clock)
+    t._parseMessage(t._now(), Message(0, 1, [halfOpen(0, 2)], None, 0, '').pack())
+    assert fired[0] == t._now()
 
 def test_writeDeferredFiresSendingLotsOfData(messageTransport):
     t = messageTransport
@@ -270,15 +268,15 @@ def test_writeDeferredFiresSendingLotsOfData(messageTransport):
     fired = []
     d.addCallback(fired.append)
     assert not fired
-    t.clock.pump([1, 1])
-    t.parseMessage(t.now(), Message(0, 1, [halfOpen(0, 2)], None, 0, '').pack())
+    t._clock.pump([1, 1])
+    t._parseMessage(t._now(), Message(0, 1, [halfOpen(0, 2)], None, 0, '').pack())
     assert not fired
-    t.parseMessage(t.now(), Message(0, 1, [halfOpen(0, 1024)], None, 0, '').pack())
+    t._parseMessage(t._now(), Message(0, 1, [halfOpen(0, 1024)], None, 0, '').pack())
     assert not fired
-    t.parseMessage(t.now(), Message(0, 1, [halfOpen(0, 2045)], None, 0, '').pack())
+    t._parseMessage(t._now(), Message(0, 1, [halfOpen(0, 2045)], None, 0, '').pack())
     assert not fired
-    t.parseMessage(t.now(), Message(0, 1, [halfOpen(0, 2046)], None, 0, '').pack())
-    assert fired[0] == t.now()
+    t._parseMessage(t._now(), Message(0, 1, [halfOpen(0, 2046)], None, 0, '').pack())
+    assert fired[0] == t._now()
 
 def test_closeDeferredFires(messageTransport):
     t = messageTransport
@@ -286,9 +284,9 @@ def test_closeDeferredFires(messageTransport):
     fired = []
     d.addCallback(fired.append)
     assert not fired
-    t.clock.advance(1)
-    t.parseMessage(t.now(), Message(0, 1, [halfOpen(0, 1)], None, 0, '').pack())
-    assert fired[0] == t.now()
+    t._clock.advance(1)
+    t._parseMessage(t._now(), Message(0, 1, [halfOpen(0, 1)], None, 0, '').pack())
+    assert fired[0] == t._now()
 
 def test_closeDeferredFiresAfterSendingData(messageTransport):
     t = messageTransport
@@ -298,82 +296,82 @@ def test_closeDeferredFiresAfterSendingData(messageTransport):
     fired = []
     d.addCallback(fired.append)
     assert not fired
-    t.clock.pump([1, 1, 1])
-    t.parseMessage(t.now(), Message(0, 1, [halfOpen(0, 1)], None, 0, '').pack())
+    t._clock.pump([1, 1, 1])
+    t._parseMessage(t._now(), Message(0, 1, [halfOpen(0, 1)], None, 0, '').pack())
     assert not fired
-    t.parseMessage(t.now(), Message(0, 1, [halfOpen(0, 6)], None, 0, '').pack())
+    t._parseMessage(t._now(), Message(0, 1, [halfOpen(0, 6)], None, 0, '').pack())
     assert not fired
-    t.parseMessage(t.now(), Message(0, 1, [halfOpen(0, 11)], None, 0, '').pack())
-    assert fired[0] == t.now()
+    t._parseMessage(t._now(), Message(0, 1, [halfOpen(0, 11)], None, 0, '').pack())
+    assert fired[0] == t._now()
 
 def test_readConnectionClosesAfterAllDataIsRead(messageTransport):
     t = messageTransport
-    t.parseMessage(t.now(), Message(1, 0, [], 'success', 4, '').pack())
-    assert not t.protocol.readsClosed
-    t.parseMessage(t.now(), Message(2, 0, [], None, 0, 'spam').pack())
-    assert t.protocol.readsClosed
+    t._parseMessage(t._now(), Message(1, 0, [], 'success', 4, '').pack())
+    assert not t._protocol.readsClosed
+    t._parseMessage(t._now(), Message(2, 0, [], None, 0, 'spam').pack())
+    assert t._protocol.readsClosed
 
 def test_receivingData(messageTransport):
     t = messageTransport
-    t.parseMessage(t.now(), Message(1, 0, [], None, 0, 'hi').pack())
-    assert t.protocol.data == 'hi'
+    t._parseMessage(t._now(), Message(1, 0, [], None, 0, 'hi').pack())
+    assert t._protocol.data == 'hi'
 
 def test_receivingFragmentedData(messageTransport):
     t = messageTransport
-    t.parseMessage(t.now(), Message(3, 0, [], None, 6, '111').pack())
-    assert t.protocol.data == ''
-    t.parseMessage(t.now(), Message(2, 0, [], None, 3, '222').pack())
-    assert t.protocol.data == ''
-    t.parseMessage(t.now(), Message(1, 0, [], None, 0, '333').pack())
-    assert t.protocol.data == '333222111'
+    t._parseMessage(t._now(), Message(3, 0, [], None, 6, '111').pack())
+    assert t._protocol.data == ''
+    t._parseMessage(t._now(), Message(2, 0, [], None, 3, '222').pack())
+    assert t._protocol.data == ''
+    t._parseMessage(t._now(), Message(1, 0, [], None, 0, '333').pack())
+    assert t._protocol.data == '333222111'
 
 def test_receivingOverlappingFragmentedData(messageTransport):
     t = messageTransport
-    t.parseMessage(t.now(), Message(3, 0, [], None, 5, '2111').pack())
-    assert t.protocol.data == ''
-    t.parseMessage(t.now(), Message(2, 0, [], None, 2, '32221').pack())
-    assert t.protocol.data == ''
-    t.parseMessage(t.now(), Message(1, 0, [], None, 0, '3332').pack())
-    assert t.protocol.data == '333222111'
+    t._parseMessage(t._now(), Message(3, 0, [], None, 5, '2111').pack())
+    assert t._protocol.data == ''
+    t._parseMessage(t._now(), Message(2, 0, [], None, 2, '32221').pack())
+    assert t._protocol.data == ''
+    t._parseMessage(t._now(), Message(1, 0, [], None, 0, '3332').pack())
+    assert t._protocol.data == '333222111'
 
 def test_emptyMessageQueueWaitsForAWhile(messageTransport):
     t = messageTransport
-    t.clock.advance(1)
-    assert nextCallIn(t.clock) == 60
+    t._clock.advance(1)
+    assert nextCallIn(t._clock) == 60
 
 def test_emptyingTheMessageQueueWaitsForAWhile(messageTransport):
     t = messageTransport
     t.write('hi')
-    t.clock.pump([1, 10])
-    t.parseMessage(t.now(), Message(0, 1, [halfOpen(0, 2)], None, 0, '').pack())
-    t.clock.advance(10)
-    assert len(t.sendMessage.captured) == 2
-    assert nextCallIn(t.clock) == 60
+    t._clock.pump([1, 10])
+    t._parseMessage(t._now(), Message(0, 1, [halfOpen(0, 2)], None, 0, '').pack())
+    t._clock.advance(10)
+    assert len(t._sendMessage.captured) == 2
+    assert nextCallIn(t._clock) == 60
 
 def test_messagesResendAfterTimingOut(messageTransport):
     t = messageTransport
     t.write('hi')
-    t.clock.pump([1, 5, 5, 5, 5])
-    assert len(t.sendMessage.captured) == 3
+    t._clock.pump([1, 5, 5, 5, 5])
+    assert len(t._sendMessage.captured) == 3
 
 def test_messagesSendToLastHost(serverMessageTransport):
     t = serverMessageTransport
     t.datagramReceived(clientNullMessage(1), clientHostPort)
     t.write('hi')
-    runUntilNext(t.clock)
+    runUntilNext(t._clock)
     assert t.transport.written[0][1] == clientHostPort
     t.datagramReceived(clientNullMessage(2), clientHostPort2)
-    runUntilNext(t.clock)
-    runUntilNext(t.clock)
+    runUntilNext(t._clock)
+    runUntilNext(t._clock)
     assert t.transport.written[1][1] == clientHostPort2
 
 def test_messagesSendToLastHostWithValidPackets(serverMessageTransport):
     t = serverMessageTransport
     t.datagramReceived(clientNullMessage(1), clientHostPort)
     t.write('hi')
-    runUntilNext(t.clock)
+    runUntilNext(t._clock)
     assert t.transport.written[0][1] == clientHostPort
     t.datagramReceived('hi', clientHostPort2)
-    runUntilNext(t.clock)
-    runUntilNext(t.clock)
+    runUntilNext(t._clock)
+    runUntilNext(t._clock)
     assert t.transport.written[1][1] == clientHostPort
