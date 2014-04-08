@@ -75,9 +75,9 @@ class CurveCPServerDispatcher(DatagramProtocol):
         return transport, decrypted[352:]
 
     def datagramReceived(self, data, host_port):
-        # l = len(data)
-        # if l < 80 or l > 1184 or l & 0xf:
-        #     return
+        l = len(data)
+        if l < 80 or l > 1184 or l & 0xf:
+            return
 
         if data[:8] == 'QvnQ5XlH':
             self._replyWithCookie(data, host_port)
