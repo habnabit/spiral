@@ -10,6 +10,7 @@ from twisted.trial import unittest
 from spiral.curvecp._pynacl import endpoints
 from spiral.curvecp.errors import CurveCPConnectionDone
 from spiral.curvecp.keydir import EphemeralKey
+from spiral.test.util import BoringProcess
 
 
 class DummyProtocol(protocol.Protocol):
@@ -37,18 +38,6 @@ class DummyFactory(protocol.Factory):
         self.deferred = defer.Deferred()
 
     protocol = DummyProtocol
-
-
-class BoringProcess(protocol.ProcessProtocol):
-    def __init__(self):
-        self.deferred = defer.Deferred()
-
-    def processEnded(self, reason):
-        self.deferred.errback(reason)
-
-    def killMaybe(self):
-        if self.transport.pid is not None:
-            self.transport.signalProcess('KILL')
 
 
 class AcceptanceTests(unittest.TestCase):
