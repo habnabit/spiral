@@ -19,8 +19,12 @@ class CurveCPClientEndpoint(object):
         transport = CurveCPClientTransport(
             self.reactor, self.serverKey, fac, self.host, self.port,
             self.serverExtension, self.clientKey, self.clientExtension)
-        transport.listeningPort = self.reactor.listenUDP(0, transport)
+        listeningPort = self.reactor.listenUDP(0, transport)
+        transport.notifyFinish().addCallback(self._clientFinished, listeningPort)
         return transport.deferred
+
+    def _clientFinished(self, ign, listeningPort):
+        listeningPort.stopListening()
 
 
 class CurveCPServerEndpoint(object):

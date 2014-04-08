@@ -99,3 +99,7 @@ class CurveCPServerDispatcher(DatagramProtocol):
         transport.transport = self.transport
         transport.startProtocol()
         transport.parseMessage(transport.now(), message)
+        transport.notifyFinish().addCallback(self._clientFinished, clientID)
+
+    def _clientFinished(self, ign, clientID):
+        del self.transports[clientID]

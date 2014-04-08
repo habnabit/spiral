@@ -86,8 +86,8 @@ class _CurveCPBaseTransport(DatagramProtocol):
         self.theirStreamEnd = None
         self.reads = self.writes = None
         self.done = False
-        self.listeningPort = None
         self.outstandingMessages = 0
+        self._onDone = []
 
     def _timedOutHandshaking(self):
         self.deferred.errback(e.HandshakeTimeout())
@@ -186,12 +186,20 @@ class _CurveCPBaseTransport(DatagramProtocol):
         self.protocol.readConnectionLost()
         self._checkBothResolutions()
 
+    def notifyFinish(self):
+        if self.done:
+            return defer.succeed(None)
+        d = defer.Deferred()
+        self._onDone.append(d)
+        return d
+
     def _checkBothResolutions(self):
         if self.reads == self.writes == 'closed' and not self.done:
             self.protocol.connectionLost(Failure(e.resolution_map[self.theirResolution]()))
             self.cancel('message')
-            if self.listeningPort:
-                self.listeningPort.stopListening()
+            deferreds, self._onDone = self._onDone, None
+            for d in deferreds:
+                d.callback(None)
             # this used to be done on a callLater, but I can't remember why
             self.done = True
 
