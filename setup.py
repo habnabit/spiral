@@ -23,7 +23,6 @@ setup(
         'Twisted',
         'Parsley',
         'interval',
-        'cykeccak',
         'pynacl',
     ],
     entry_points={
