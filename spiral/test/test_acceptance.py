@@ -18,11 +18,14 @@ class RecorderProcess(BoringProcess):
         BoringProcess.__init__(self)
         self.recorded = collections.defaultdict(str)
         self.firstAt = {}
+        self.lastAt = {}
 
     def childDataReceived(self, fd, data):
         self.recorded[fd] += data
+        now = time.time()
         if fd not in self.firstAt:
-            self.firstAt[fd] = time.time()
+            self.firstAt[fd] = now
+        self.lastAt[fd] = now
 
 
 def curvecpmServer(keydir, port, command):
@@ -73,12 +76,11 @@ def buildTest(target, clientArgFunc, serverArgFunc):
 
         clientProc.transport.closeStdin()
         yield self.assertFailure(clientProc.deferred, ProcessDone)
-        timeDone = time.time()
 
         serverProc.transport.signalProcess('TERM')
         yield self.assertFailure(serverProc.deferred, ProcessDone, ProcessTerminated)
 
-        timeTaken = timeDone - clientProc.firstAt[1]
+        timeTaken = clientProc.lastAt[1] - clientProc.firstAt[1]
         throughput = len(clientProc.recorded[1]) / timeTaken
         defer.returnValue(throughput)
 
