@@ -157,9 +157,11 @@ def main(reactor):
         testObj = PerformanceTests()
         testObj.tmpdir = py.path.local.mkdtemp()
         yield testObj.setUp()
-        throughput = yield getattr(testObj, test)()
+        try:
+            throughput = yield getattr(testObj, test)()
+        finally:
+            yield testObj.cleanup()
         print test, throughput / 1024 / 1024, 'MiB/s'
-        yield testObj.cleanup()
 
 
 if __name__ == '__main__':

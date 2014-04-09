@@ -2,8 +2,6 @@ import collections
 import itertools
 import struct
 
-from parsley import makeGrammar
-
 from spiral.curvecp._pynacl.interval import halfOpen
 
 
@@ -138,44 +136,8 @@ def _makeIntervals(ranges):
 #              or FAIL>0 then this is the success/failure position, i.e., the
 #              total number of bytes in the stream.
 
-messageGrammar = """
-
-uint16 = <anything{2}>:x -> _uint16.unpack(x)[0]
-uint32 = <anything{4}>:x -> _uint32.unpack(x)[0]
-uint64 = <anything{8}>:x -> _uint64.unpack(x)[0]
-
-range16 = uint16:delta uint16:span -> (delta, span)
-spans = (uint64:firstRangeSpan uint32:secondRangeDelta
-    uint16:secondRangeSpan range16:third range16:fourth range16:fifth
-    range16:sixth) -> makeIntervals([
-        (0, firstRangeSpan), (secondRangeDelta, secondRangeSpan), third,
-        fourth, fifth, sixth])
-
-status = uint16:raw -> (raw & 0x7ff, 'success' if raw & 0x800 else 'failure' if raw & 0x1000 else None)
-
-message = (uint32:id uint32:previous spans:spans
-    status:(length, resolution) uint64:dataPos <anything*>:data end) -> Message(
-    id, previous, spans, resolution, dataPos, data[-length:] if length else '',
-)
-
-"""
-
-_bindings = dict(
-    _uint16=_uint16,
-    _uint32=_uint32,
-    _uint64=_uint64,
-    Message=Message,
-    makeIntervals=_makeIntervals,
-)
-
-
-messageParser = makeGrammar(messageGrammar, _bindings)
-def parsley_parseMessage(s):
-    return messageParser(s).message()
-
-
 messageStruct = struct.Struct('<IIQI10HQ')
-def struct_parseMessage(s):
+def parseMessage(s):
     unpacked = messageStruct.unpack_from(s)
     rawRanges = unpacked[2:13]
     it = itertools.chain([0], rawRanges)
@@ -190,6 +152,3 @@ def struct_parseMessage(s):
     return Message(
         unpacked[0], unpacked[1], intervals, resolution, unpacked[14], data,
     )
-
-
-parseMessage = struct_parseMessage

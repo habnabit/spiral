@@ -21,7 +21,6 @@ setup(
     vcversioner={},
     install_requires=[
         'Twisted',
-        'Parsley',
         'interval',
         'pynacl',
     ],
