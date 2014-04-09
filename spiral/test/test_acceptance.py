@@ -1,11 +1,13 @@
 import collections
 import os
 import pipes
-import pytest
+import time
 
+import pytest
+import py.path
 from twisted.internet.error import ProcessTerminated, ProcessDone
 from twisted.internet.utils import getProcessOutput
-from twisted.internet import defer
+from twisted.internet import defer, task
 from twisted.trial import unittest
 
 from spiral.test.util import BoringProcess
@@ -15,10 +17,12 @@ class RecorderProcess(BoringProcess):
     def __init__(self):
         BoringProcess.__init__(self)
         self.recorded = collections.defaultdict(str)
+        self.firstAt = {}
 
     def childDataReceived(self, fd, data):
-        print fd, data
         self.recorded[fd] += data
+        if fd not in self.firstAt:
+            self.firstAt[fd] = time.time()
 
 
 def curvecpmServer(keydir, port, command):
@@ -62,14 +66,30 @@ def buildTest(target, clientArgFunc, serverArgFunc):
     test_basic.__name__ = 'test_basic_%s_%s' % (clientArgFunc.__name__, serverArgFunc.__name__)
     target[test_basic.__name__] = test_basic
 
+    @defer.inlineCallbacks
+    def test_throughput(self):
+        serverProc = self.setUpServer(serverArgFunc, 'cat /usr/share/dict/words')
+        clientProc = self.setUpClient(clientArgFunc)
 
-class AcceptanceTests(unittest.TestCase):
+        clientProc.transport.closeStdin()
+        yield self.assertFailure(clientProc.deferred, ProcessDone)
+        timeDone = time.time()
+
+        serverProc.transport.signalProcess('TERM')
+        yield self.assertFailure(serverProc.deferred, ProcessDone, ProcessTerminated)
+
+        timeTaken = timeDone - clientProc.firstAt[1]
+        throughput = len(clientProc.recorded[1]) / timeTaken
+        defer.returnValue(throughput)
+
+    test_throughput.__name__ = '_test_throughput_%s_%s' % (clientArgFunc.__name__, serverArgFunc.__name__)
+    target['throughputTests'].append(test_throughput.__name__)
+    target[test_throughput.__name__] = test_throughput
+
+
+class TestsBase(object):
     timeout = 15
     port = 28783
-
-    @pytest.fixture(autouse=True)
-    def init_tmpdir(self, tmpdir):
-        self.tmpdir = tmpdir
 
     @defer.inlineCallbacks
     def setUp(self):
@@ -97,6 +117,48 @@ class AcceptanceTests(unittest.TestCase):
         self.addCleanup(clientProc.killMaybe)
         return clientProc
 
+    throughputTests = []
     for clientArgFunc in clients:
         for serverArgFunc in servers:
             buildTest(locals(), clientArgFunc, serverArgFunc)
+
+
+class AcceptanceTests(TestsBase, unittest.TestCase):
+    @pytest.fixture(autouse=True)
+    def init_tmpdir(self, tmpdir):
+        self.tmpdir = tmpdir
+
+
+class PerformanceTests(TestsBase):
+    def __init__(self):
+        self.cleanupFuncs = []
+
+    def addCleanup(self, func):
+        self.cleanupFuncs.append(func)
+
+    @defer.inlineCallbacks
+    def cleanup(self):
+        for func in self.cleanupFuncs:
+            yield func()
+
+    def assertFailure(self, deferred, *exceptions):
+        def err(f):
+            f.trap(*exceptions)
+
+        deferred.addErrback(err)
+        return deferred
+
+
+@defer.inlineCallbacks
+def main(reactor):
+    for test in PerformanceTests.throughputTests:
+        testObj = PerformanceTests()
+        testObj.tmpdir = py.path.local.mkdtemp()
+        yield testObj.setUp()
+        throughput = yield getattr(testObj, test)()
+        print test, throughput / 1024 / 1024, 'MiB/s'
+        yield testObj.cleanup()
+
+
+if __name__ == '__main__':
+    task.react(main, [])
