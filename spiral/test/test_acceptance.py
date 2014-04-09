@@ -3,15 +3,11 @@ import os
 import pipes
 import pytest
 
-from nacl.public import PublicKey
 from twisted.internet.error import ProcessTerminated, ProcessDone
 from twisted.internet.utils import getProcessOutput
-from twisted.internet import defer, protocol
+from twisted.internet import defer
 from twisted.trial import unittest
 
-from spiral.curvecp._pynacl import endpoints
-from spiral.curvecp.errors import CurveCPConnectionDone
-from spiral.curvecp.keydir import EphemeralKey
 from spiral.test.util import BoringProcess
 
 
@@ -25,7 +21,29 @@ class RecorderProcess(BoringProcess):
         self.recorded[fd] += data
 
 
-def buildTest(target, client, server):
+def curvecpmServer(keydir, port, command):
+    return ['curvecpmserver', keydir, str(port), '--', 'sh', '-c', command]
+
+
+def curvecpServer(keydir, port, command):
+    return ['curvecpserver', '127.0.0.1', keydir, '127.0.0.1', str(port), '0' * 32,
+            'curvecpmessage', 'sh', '-c', command]
+
+
+def curvecpmClient(key, port):
+    return ['curvecpmclient', key, '127.0.0.1', port, 'socat', 'stdio', 'fd:6!!fd:7']
+
+
+def curvecpClient(key, port):
+    return ['curvecpclient', '127.0.0.1', key, '127.0.0.1', port, '0' * 32,
+            'curvecpmessage', '-c', 'socat', 'stdio', 'fd:6!!fd:7']
+
+
+servers = [curvecpmServer, curvecpServer]
+clients = [curvecpmClient, curvecpClient]
+
+
+def buildTest(target, clientArgFunc, serverArgFunc):
     @defer.inlineCallbacks
     def test(self):
         from twisted.internet import reactor
@@ -36,24 +54,16 @@ def buildTest(target, client, server):
             key = infile.read().encode('hex')
 
         command = 'echo spam eggs; cat >' + pipes.quote(serverOut.strpath)
-        if server == 'curvecpm':
-            args = ['curvecpmserver', keydir, str(self.port), '--', 'sh', '-c', command]
-        elif server == 'curvecp':
-            args = ['curvecpserver', '127.0.0.1', keydir, '127.0.0.1', str(self.port), '0' * 32,
-                    'curvecpmessage', 'sh', '-c', command]
+        serverArgs = serverArgFunc(keydir, str(self.port), command)
         serverProc = RecorderProcess()
         reactor.spawnProcess(
-            serverProc, args[0], args, env=os.environ, childFDs={2: 'r'})
+            serverProc, serverArgs[0], serverArgs, env=os.environ, childFDs={2: 'r'})
         self.addCleanup(serverProc.killMaybe)
 
-        if client == 'curvecpm':
-            args = ['curvecpmclient', key, '127.0.0.1', str(self.port), 'socat', 'stdio', 'fd:6!!fd:7']
-        elif client == 'curvecp':
-            args = ['curvecpclient', '127.0.0.1', key, '127.0.0.1', str(self.port), '0' * 32,
-                    'curvecpmessage', '-c', 'socat', 'stdio', 'fd:6!!fd:7']
+        clientArgs = clientArgFunc(key, str(self.port))
         clientProc = RecorderProcess()
         reactor.spawnProcess(
-            clientProc, args[0], args, env=os.environ,
+            clientProc, clientArgs[0], clientArgs, env=os.environ,
             childFDs={0: 'w', 1: 'r', 2: 2})
         self.addCleanup(clientProc.killMaybe)
 
@@ -65,20 +75,18 @@ def buildTest(target, client, server):
         assert serverOut.read() == 'eggs spam'
         assert clientProc.recorded[1] == 'spam eggs\n'
 
-    test.__name__ = 'test_client_%s_server_%s' % (client, server)
+    test.__name__ = 'test_%s_%s' % (clientArgFunc.__name__, serverArgFunc.__name__)
     target[test.__name__] = test
 
 
 class AcceptanceTests(unittest.TestCase):
-    timeout = 5
+    timeout = 15
     port = 28783
 
     @pytest.fixture(autouse=True)
     def init_tmpdir(self, tmpdir):
         self.tmpdir = tmpdir
 
-    for client in ['curvecp', 'curvecpm']:
-        for server in ['curvecp', 'curvecpm']:
-            if client == server == 'curvecp':
-                continue
-            buildTest(locals(), client, server)
+    for clientArgFunc in clients:
+        for serverArgFunc in servers:
+            buildTest(locals(), clientArgFunc, serverArgFunc)
