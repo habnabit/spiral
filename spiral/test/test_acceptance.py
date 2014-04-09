@@ -45,27 +45,11 @@ clients = [curvecpmClient, curvecpClient]
 
 def buildTest(target, clientArgFunc, serverArgFunc):
     @defer.inlineCallbacks
-    def test(self):
-        from twisted.internet import reactor
-        keydir = self.tmpdir.join('key').strpath
+    def test_basic(self):
         serverOut = self.tmpdir.join('server-out')
-        yield getProcessOutput('curvecpmakekey', [keydir], env=os.environ)
-        with open(os.path.join(keydir, 'publickey')) as infile:
-            key = infile.read().encode('hex')
-
         command = 'echo spam eggs; cat >' + pipes.quote(serverOut.strpath)
-        serverArgs = serverArgFunc(keydir, str(self.port), command)
-        serverProc = RecorderProcess()
-        reactor.spawnProcess(
-            serverProc, serverArgs[0], serverArgs, env=os.environ, childFDs={2: 'r'})
-        self.addCleanup(serverProc.killMaybe)
-
-        clientArgs = clientArgFunc(key, str(self.port))
-        clientProc = RecorderProcess()
-        reactor.spawnProcess(
-            clientProc, clientArgs[0], clientArgs, env=os.environ,
-            childFDs={0: 'w', 1: 'r', 2: 2})
-        self.addCleanup(clientProc.killMaybe)
+        serverProc = self.setUpServer(serverArgFunc, command)
+        clientProc = self.setUpClient(clientArgFunc)
 
         clientProc.transport.writeToChild(0, 'eggs spam')
         clientProc.transport.closeStdin()
@@ -75,8 +59,8 @@ def buildTest(target, clientArgFunc, serverArgFunc):
         assert serverOut.read() == 'eggs spam'
         assert clientProc.recorded[1] == 'spam eggs\n'
 
-    test.__name__ = 'test_%s_%s' % (clientArgFunc.__name__, serverArgFunc.__name__)
-    target[test.__name__] = test
+    test_basic.__name__ = 'test_basic_%s_%s' % (clientArgFunc.__name__, serverArgFunc.__name__)
+    target[test_basic.__name__] = test_basic
 
 
 class AcceptanceTests(unittest.TestCase):
@@ -86,6 +70,32 @@ class AcceptanceTests(unittest.TestCase):
     @pytest.fixture(autouse=True)
     def init_tmpdir(self, tmpdir):
         self.tmpdir = tmpdir
+
+    @defer.inlineCallbacks
+    def setUp(self):
+        from twisted.internet import reactor
+        self.reactor = reactor
+        self.keydir = self.tmpdir.join('key').strpath
+        yield getProcessOutput('curvecpmakekey', [self.keydir], env=os.environ)
+        with open(os.path.join(self.keydir, 'publickey')) as infile:
+            self.key = infile.read().encode('hex')
+
+    def setUpServer(self, serverArgFunc, command):
+        serverArgs = serverArgFunc(self.keydir, str(self.port), command)
+        serverProc = RecorderProcess()
+        self.reactor.spawnProcess(
+            serverProc, serverArgs[0], serverArgs, env=os.environ, childFDs={2: 'r'})
+        self.addCleanup(serverProc.killMaybe)
+        return serverProc
+
+    def setUpClient(self, clientArgFunc):
+        clientArgs = clientArgFunc(self.key, str(self.port))
+        clientProc = RecorderProcess()
+        self.reactor.spawnProcess(
+            clientProc, clientArgs[0], clientArgs, env=os.environ,
+            childFDs={0: 'w', 1: 'r', 2: 2})
+        self.addCleanup(clientProc.killMaybe)
+        return clientProc
 
     for clientArgFunc in clients:
         for serverArgFunc in servers:
