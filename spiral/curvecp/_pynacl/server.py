@@ -18,10 +18,11 @@ _initiateInnerStruct = struct.Struct('<32s16s48s256s')
 
 
 class CurveCPServerDispatcher(DatagramProtocol):
-    def __init__(self, reactor, serverKey, factory):
+    def __init__(self, reactor, serverKey, factory, congestion=None):
         self.reactor = reactor
         self.serverKey = serverKey
         self.factory = factory
+        self.congestion = congestion
         self.transports = {}
         self._secretBox = SecretBox(os.urandom(SecretBox.KEY_SIZE))
 
@@ -71,7 +72,8 @@ class CurveCPServerDispatcher(DatagramProtocol):
             return
         transport = CurveCPServerTransport(
             self.reactor, self.serverKey, self.factory, clientID,
-            clientPubkey, host_port, serverShortClientShort, dnsToName(serverDomain))
+            clientPubkey, host_port, serverShortClientShort, dnsToName(serverDomain),
+            self.congestion)
         return transport, decrypted[352:]
 
     def datagramReceived(self, data, host_port):

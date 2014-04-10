@@ -73,7 +73,8 @@ def twistedMain(reactor, args):
         serverKey=PublicKey(args.key.decode('hex')),
         serverExtension=args.server_extension.decode('hex'),
         clientKey=args.client_keydir,
-        clientExtension=args.client_extension.decode('hex'))
+        clientExtension=args.client_extension.decode('hex'),
+        congestion=args.congestion)
     d = e.connect(fac)
 
     def gotProto(proto):
@@ -85,7 +86,7 @@ def twistedMain(reactor, args):
 
 def main():
     parser = argparse.ArgumentParser()
-    _curvecpm.addLogArguments(parser)
+    _curvecpm.addCommonArguments(parser)
     parser.add_argument('-n', '--name')
     parser.add_argument('-e', '--server-extension', default='0' * 32)
     parser.add_argument('-k', '--client-keydir', type=Keydir)

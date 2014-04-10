@@ -2,7 +2,7 @@ from __future__ import division
 
 import os
 
-from spiral.curvecp.pynacl._dna_pb2 import WhiskerTree, Memory
+from spiral.curvecp._pynacl._dna_pb2 import WhiskerTree, Memory
 
 
 ALPHA = 1 / 8
@@ -13,7 +13,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 class Remy(object):
     def __init__(self):
         self.tree = WhiskerTree()
-        with open(os.path.join(HERE, 'remy.out.0')) as infile:
+        with open(os.path.join(HERE, 'remy.out.1')) as infile:
             self.tree.ParseFromString(infile.read())
         self.lastReceivedAt = None
         self.rttMin = None

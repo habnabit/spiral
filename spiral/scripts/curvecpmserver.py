@@ -54,13 +54,13 @@ class CurveCPMServerFactory(protocol.Factory):
 def twistedMain(reactor, args):
     _curvecpm.startLogging(args.verbosity)
     fac = CurveCPMServerFactory(reactor, args)
-    e = CurveCPServerEndpoint(reactor, args.keydir, args.port)
+    e = CurveCPServerEndpoint(reactor, args.keydir, args.port, args.congestion)
     e.listen(fac)
     return defer.Deferred()
 
 def main():
     parser = argparse.ArgumentParser()
-    _curvecpm.addLogArguments(parser)
+    _curvecpm.addCommonArguments(parser)
     parser.add_argument('-n', '--name')
     parser.add_argument('-e', '--server-extension', default='0' * 32)
     parser.add_argument('keydir', type=Keydir)

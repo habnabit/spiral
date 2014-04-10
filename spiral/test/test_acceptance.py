@@ -32,6 +32,10 @@ def curvecpmServer(keydir, port, command):
     return ['curvecpmserver', keydir, str(port), '--', 'sh', '-c', command]
 
 
+def curvecpmRemyServer(keydir, port, command):
+    return ['curvecpmserver', keydir, str(port), '--congestion=remy', '--', 'sh', '-c', command]
+
+
 def curvecpServer(keydir, port, command):
     return ['curvecpserver', '127.0.0.1', keydir, '127.0.0.1', str(port), '0' * 32,
             'curvecpmessage', 'sh', '-c', command]
@@ -41,13 +45,17 @@ def curvecpmClient(key, port):
     return ['curvecpmclient', key, '127.0.0.1', port, 'socat', 'stdio', 'fd:6!!fd:7']
 
 
+def curvecpmRemyClient(key, port):
+    return ['curvecpmclient', key, '127.0.0.1', port, '--congestion=remy', 'socat', 'stdio', 'fd:6!!fd:7']
+
+
 def curvecpClient(key, port):
     return ['curvecpclient', '127.0.0.1', key, '127.0.0.1', port, '0' * 32,
             'curvecpmessage', '-c', 'socat', 'stdio', 'fd:6!!fd:7']
 
 
-servers = [curvecpmServer, curvecpServer]
-clients = [curvecpmClient, curvecpClient]
+servers = [curvecpmServer, curvecpmRemyServer, curvecpServer]
+clients = [curvecpmClient, curvecpmRemyClient, curvecpClient]
 
 
 def buildTest(target, clientArgFunc, serverArgFunc):

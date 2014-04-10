@@ -3,6 +3,7 @@ from __future__ import division, absolute_import
 import bisect
 import collections
 import heapq
+import os
 import struct
 
 from interval import IntervalSet
@@ -17,6 +18,7 @@ from spiral.curvecp.address import CurveCPAddress
 from spiral.curvecp.keydir import EphemeralKey
 from spiral.curvecp.util import nameToDNS
 from spiral.curvecp._pynacl.chicago import Chicago
+from spiral.curvecp._pynacl.remy import Remy
 from spiral.curvecp._pynacl.interval import halfOpen
 from spiral.curvecp._pynacl.message import Message, parseMessage
 from spiral.util import MultiTimeout
@@ -58,7 +60,7 @@ class _CurveCPBaseTransport(DatagramProtocol):
     _generateKey = staticmethod(PrivateKey.generate)
     _generateKeydir = staticmethod(EphemeralKey)
 
-    def __init__(self, clock, serverKey, factory):
+    def __init__(self, clock, serverKey, factory, congestion=None):
         self._clock = clock
         self._serverKey = serverKey
         self._factory = factory
@@ -69,7 +71,6 @@ class _CurveCPBaseTransport(DatagramProtocol):
         self._sentMessages = set()
         self._previousID = 0
         self._fragment = []
-        self._congestion = Chicago()
         self._sentMessageAt = {}
         self._delayedCalls = {}
         self._messageQueue = []
@@ -84,6 +85,12 @@ class _CurveCPBaseTransport(DatagramProtocol):
         self._done = False
         self._outstandingMessages = 0
         self._onDone = []
+        if congestion is None or congestion == 'chicago':
+            self._congestion = Chicago()
+        elif congestion == 'remy':
+            self._congestion = Remy()
+        else:
+            raise ValueError('invalid congestion type', congestion)
 
     def _now(self):
         return self._clock.seconds()
@@ -324,8 +331,9 @@ class _CurveCPBaseTransport(DatagramProtocol):
 
 class CurveCPClientTransport(_CurveCPBaseTransport):
     def __init__(self, clock, serverKey, factory, host, port,
-                 serverExtension, clientKey=None, clientExtension='\x00' * 16):
-        _CurveCPBaseTransport.__init__(self, clock, serverKey, factory)
+                 serverExtension, clientKey=None, clientExtension='\x00' * 16,
+                 congestion=None):
+        _CurveCPBaseTransport.__init__(self, clock, serverKey, factory, congestion)
         self._peerHost = host, port
         self._serverDomain = host
         self._serverExtension = serverExtension
@@ -440,8 +448,8 @@ class CurveCPClientTransport(_CurveCPBaseTransport):
 
 class CurveCPServerTransport(_CurveCPBaseTransport):
     def __init__(self, clock, serverKey, factory, clientID, clientPubkey,
-                 peerHost, serverShortClientShort, serverDomain):
-        _CurveCPBaseTransport.__init__(self, clock, serverKey, factory)
+                 peerHost, serverShortClientShort, serverDomain, congestion=None):
+        _CurveCPBaseTransport.__init__(self, clock, serverKey, factory, congestion)
         self._serverExtension = clientID[:16]
         self._clientExtension = clientID[16:32]
         self._clientShortPubkey = PublicKey(clientID[32:64])

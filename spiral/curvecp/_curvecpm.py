@@ -3,13 +3,14 @@ import sys
 from twisted.python import log
 
 
-def addLogArguments(parser):
+def addCommonArguments(parser):
     parser.add_argument(
         '-Q', dest='verbosity', action='store_const', const='error', default='error')
     parser.add_argument(
         '-v', dest='verbosity', action='store_const', const='success')
     parser.add_argument(
         '-q', dest='verbosity', action='store_const', const='none')
+    parser.add_argument('--congestion')
 
 
 def getLogObserver(verbosity):
