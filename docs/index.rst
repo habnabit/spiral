@@ -8,7 +8,7 @@ API
 
 .. module:: spiral.curvecp
 
-.. autoclass:: CurveCPClientEndpoint(reactor, host, port, serverKey, serverExtension, clientKey=None, clientExtension='\\x00' * 16)
+.. autoclass:: CurveCPClientEndpoint(reactor, host, port, serverKey, serverExtension='\\x00' * 16, clientKey=None, clientExtension='\\x00' * 16)
 
 .. autoclass:: CurveCPServerEndpoint(reactor, serverKey, port)
 
