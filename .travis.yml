@@ -1,0 +1,13 @@
+language: python
+python:
+  - "2.6"
+  - "2.7"
+
+install:
+  - "wget http://hyperelliptic.org/nacl/nacl-20110221.tar.bz2"
+  - "tar xjvf nacl-20110221.tar.bz2"
+  - "(cd nacl-20110221; ./do)"
+  - "ls nacl-20110221/build/*/bin"
+  - "pip install pytest coveralls spiral --use-mirrors"
+script: "coverage run $(which py.test)"
+after_success: "coveralls"
