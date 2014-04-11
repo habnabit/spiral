@@ -5,8 +5,10 @@ python:
 
 install:
   - "wget http://hyperelliptic.org/nacl/nacl-20110221.tar.bz2"
-  - "tar xjvf nacl-20110221.tar.bz2"
+  - "tar xjf nacl-20110221.tar.bz2"
   - "(cd nacl-20110221; ./do)"
-  - "pip install pytest coveralls . --use-mirrors"
+  - "sudo apt-get update"
+  - "sudo apt-get install socat"
+  - "pip install pytest coveralls ."
 script: "PATH=$(ls -d1 nacl-20110221/build/*/bin):$PATH coverage run $(which py.test)"
 after_success: "coveralls"
