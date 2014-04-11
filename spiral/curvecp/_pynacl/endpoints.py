@@ -16,9 +16,9 @@ class CurveCPClientEndpoint(object):
     :param serverKey: The server's public key, as a 32-byte string.
     :param serverExtension: Optionally, the 16-byte server extension. Defaults
         to all null bytes.
-    :param clientKey: Optionally, an |IKeydir| provider for the client's
-        private key. Defaults to generating an ephemeral key for the client on
-        every new connection.
+    :param clientKey: Optionally, an |IKeyAndNonceScheme| provider for the
+        client's private key. Defaults to generating an ephemeral key for
+        client the on every new connection.
     :param clientExtension: Optionally, the 16-byte client extension. Defaults
         to all null bytes.
 
@@ -60,8 +60,8 @@ class CurveCPServerEndpoint(object):
 
     :param reactor: An `IReactorUDP`_ and `IReactorTime`_ provider.
     :param port: The port to listen on.
-    :param serverKey: An |IKeydir| provider representing the server's private
-        key.
+    :param serverKey: An |IKeyAndNonceScheme| provider representing the
+        server's private key.
 
     .. _IStreamServerEndpoint: http://twistedmatrix.com/documents/current/api/twisted.internet.interfaces.IStreamServerEndpoint.html
     .. _IReactorUDP: http://twistedmatrix.com/documents/current/api/twisted.internet.interfaces.IReactorUDP.html

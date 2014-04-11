@@ -20,7 +20,11 @@ API
 
 .. module:: spiral.curvecp.keydir
 
-.. autointerface:: IKeydir
+.. autointerface:: ICurveCPKey
+
+   .. attribute:: key
+
+      A ``nacl.public.PrivateKey`` instance.
 
 .. autoclass:: Keydir
 

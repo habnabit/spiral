@@ -9,14 +9,24 @@ from zope.interface import implementer, Attribute, Interface
 counterStruct = struct.Struct('<Q')
 
 
-class IKeydir(Interface):
-    key = Attribute('')
+class IKeyAndNonceScheme(Interface):
+    """
+    A key and nonce generation scheme.
+    """
+
+    key = Attribute('A nacl.public.PrivateKey instance.')
 
     def nonce(longterm=False):
-        pass
+        """
+        Generate a nonce.
+
+        :param longterm: True to increment the long-term counter; False to
+            increment the short-term counter.
+        :returns: 16 bytes.
+        """
 
 
-@implementer(IKeydir)
+@implementer(IKeyAndNonceScheme)
 class Keydir(object):
     def __init__(self, keydir):
         self.keydir = keydir
@@ -39,7 +49,7 @@ class Keydir(object):
         return os.urandom(8) + data
 
 
-@implementer(IKeydir)
+@implementer(IKeyAndNonceScheme)
 class EphemeralKey(object):
     def __init__(self):
         self.key = PrivateKey.generate()
