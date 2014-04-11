@@ -6,8 +6,8 @@ from twisted.internet.task import react
 from twisted.internet import defer, protocol
 from twisted.python import log
 
-from spiral.curvecp.keydir import Keydir
 from spiral.curvecp import CurveCPClientEndpoint, _curvecpm
+from spiral.keys import Keydir
 
 
 class CurveCPMClientProcessProtocol(protocol.ProcessProtocol):

@@ -9,7 +9,7 @@ from twisted.trial import unittest
 
 from spiral.curvecp._pynacl import endpoints
 from spiral.curvecp.errors import CurveCPConnectionDone
-from spiral.curvecp.keydir import EphemeralKey
+from spiral.keys import EphemeralKey
 from spiral.test.util import BoringProcess
 
 
@@ -73,7 +73,7 @@ class AcceptanceTests(unittest.TestCase):
     def test_server(self):
         from twisted.internet import reactor
         key = EphemeralKey()
-        endpoint = endpoints.CurveCPServerEndpoint(reactor, key, 0)
+        endpoint = endpoints.CurveCPServerEndpoint(reactor, 0, key)
         fac = DummyFactory('hello world')
         listeningPort = yield endpoint.listen(fac)
         self.addCleanup(listeningPort.stopListening)

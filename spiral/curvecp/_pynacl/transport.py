@@ -14,11 +14,11 @@ from twisted.python.failure import Failure
 
 from spiral.curvecp import errors as e
 from spiral.curvecp.address import CurveCPAddress
-from spiral.curvecp.keydir import EphemeralKey
 from spiral.curvecp.util import nameToDNS
 from spiral.curvecp._pynacl.chicago import Chicago
 from spiral.curvecp._pynacl.interval import halfOpen
 from spiral.curvecp._pynacl.message import Message, parseMessage
+from spiral.keys import EphemeralKey
 from spiral.util import MultiTimeout
 
 

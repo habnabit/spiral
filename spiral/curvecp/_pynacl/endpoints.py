@@ -68,10 +68,10 @@ class CurveCPServerEndpoint(object):
     .. _IReactorTime: http://twistedmatrix.com/documents/current/api/twisted.internet.interfaces.IReactorTime.html
     """
 
-    def __init__(self, reactor, serverKey, port):
+    def __init__(self, reactor, port, serverKey):
         self.reactor = reactor
-        self.serverKey = serverKey
         self.port = port
+        self.serverKey = serverKey
 
     def listen(self, fac):
         dispatcher = CurveCPServerDispatcher(self.reactor, self.serverKey, fac)
