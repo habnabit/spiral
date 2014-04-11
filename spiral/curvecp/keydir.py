@@ -3,11 +3,20 @@ import os
 import struct
 
 from nacl.public import PrivateKey
+from zope.interface import implementer, Attribute, Interface
 
 
 counterStruct = struct.Struct('<Q')
 
 
+class IKeydir(Interface):
+    key = Attribute('')
+
+    def nonce(longterm=False):
+        pass
+
+
+@implementer(IKeydir)
 class Keydir(object):
     def __init__(self, keydir):
         self.keydir = keydir
@@ -30,6 +39,7 @@ class Keydir(object):
         return os.urandom(8) + data
 
 
+@implementer(IKeydir)
 class EphemeralKey(object):
     def __init__(self):
         self.key = PrivateKey.generate()
