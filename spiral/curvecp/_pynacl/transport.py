@@ -430,12 +430,12 @@ class CurveCPClientTransport(_CurveCPBaseTransport):
         host = self.transport.getHost()
         return CurveCPAddress(
             self._clientExtension, self._serverExtension, self._serverDomain,
-            self._clientKey.key.public_key, (host.host, host.port))
+            self._clientKey.key.public_key, host.host, host.port)
 
     def getPeer(self):
         return CurveCPAddress(
             self._clientExtension, self._serverExtension, self._serverDomain,
-            self._serverKey, self._peerHost)
+            self._serverKey, *self._peerHost)
 
 
 class CurveCPServerTransport(_CurveCPBaseTransport):
@@ -488,9 +488,9 @@ class CurveCPServerTransport(_CurveCPBaseTransport):
         host = self.transport.getHost()
         return CurveCPAddress(
             self._clientExtension, self._serverExtension, self._serverDomain,
-            self._serverKey.key.public_key, (host.host, host.port))
+            self._serverKey.key.public_key, host.host, host.port)
 
     def getPeer(self):
         return CurveCPAddress(
             self._clientExtension, self._serverExtension, self._serverDomain,
-            self._clientPubkey, self._peerHost)
+            self._clientPubkey, *self._peerHost)

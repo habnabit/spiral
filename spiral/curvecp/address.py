@@ -5,16 +5,23 @@ from zope.interface import implementer, Attribute
 
 
 class ICurveCPAddress(IAddress):
-    clientExtension = Attribute('')
-    serverExtension = Attribute('')
-    serverDomain = Attribute('')
-    longTermKey = Attribute('')
-    transport = Attribute('')
+    clientExtension = Attribute(
+        "The 16-byte client extension associated with the connection.")
+    serverExtension = Attribute(
+        "The 16-byte server extension associated with the connection.")
+    serverDomain = Attribute(
+        "A string representing the server's DNS name.")
+    longTermKey = Attribute(
+        "A ``nacl.public.PublicKey`` representing the other side's long term public key.")
+    transportHost = Attribute(
+        "The host or IP of the other side of this connection.")
+    transportPort = Attribute(
+        "The port of the other side of this connection.")
 
 
 _CurveCPAddressBase = collections.namedtuple('_CurveCPAddressBase', [
     'clientExtension', 'serverExtension', 'serverDomain', 'longTermKey',
-    'transport',
+    'transportHost', 'transportPort',
 ])
 
 @implementer(ICurveCPAddress)
@@ -26,12 +33,14 @@ class CurveCPAddress(_CurveCPAddressBase):
         if requesterSide == addressSide:
             ret.update({
                 'CURVECPLOCALKEY': str(self.longTermKey).encode('hex'),
-                'CURVECPLOCALTRANSPORT': '%s:%d' % self.transport,
+                'CURVECPLOCALTRANSPORT': '%s:%d' % (
+                    self.transportHost, self.transportPort),
             })
         else:
             ret.update({
                 'CURVECPREMOTEKEY': str(self.longTermKey).encode('hex'),
-                'CURVECPREMOTETRANSPORT': '%s:%d' % self.transport,
+                'CURVECPREMOTETRANSPORT': '%s:%d' % (
+                    self.transportHost, self.transportPort),
             })
 
         if requesterSide == 'client':

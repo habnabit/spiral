@@ -16,26 +16,27 @@ API
 .. module:: spiral.curvecp.address
 
 .. autointerface:: ICurveCPAddress
-
-
-.. module:: spiral.curvecp.keydir
-
-.. autointerface:: ICurveCPKey
-
-   .. attribute:: key
-
-      A ``nacl.public.PrivateKey`` instance.
-
-.. autoclass:: Keydir
-
-.. autoclass:: EphemeralKey
+   :members: clientExtension, serverExtension, serverDomain, longTermKey, transport
 
 
 .. automodule:: spiral.curvecp.errors
    :members: HandshakeTimeout, CurveCPConnectionDone, CurveCPConnectionFailed
 
 
+``spiral.keys``
+---------------
+
+.. module:: spiral.keys
+
+.. autointerface:: IKeyAndNonceScheme
+   :members: key, nonce
+
+.. autoclass:: Keydir
+
+.. autoclass:: EphemeralKey
+
+
 .. |CurveCPClientEndpoint| replace:: :class:`.CurveCPClientEndpoint`
 .. |CurveCPServerEndpoint| replace:: :class:`.CurveCPServerEndpoint`
 .. |ICurveCPAddress| replace:: :interface:`.ICurveCPAddress`
-.. |IKeydir| replace:: :interface:`.IKeydir`
+.. |IKeyAndNonceScheme| replace:: :interface:`.IKeyAndNonceScheme`
