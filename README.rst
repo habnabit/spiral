@@ -9,6 +9,10 @@ A `twisted`_ curve is a spiral.
 At the moment,
 this is limited to `DNSCurve`_ and `CurveCP`_.
 
+**Note**:
+``spiral`` is still experimental in general;
+no guarantees are made about the continued existence of APIs.
+
 
 DNSCurve
 ========
