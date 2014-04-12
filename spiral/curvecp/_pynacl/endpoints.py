@@ -38,6 +38,15 @@ class CurveCPClientEndpoint(object):
         self.clientExtension = clientExtension
 
     def connect(self, fac):
+        """
+        Connect to a CurveCP host.
+
+        :param fac: An `IProtocolFactory`_ provider whose ``buildProtocol``
+            returns an `IHalfCloseableProtocol`_ provider.
+
+        .. _IProtocolFactory: http://twistedmatrix.com/documents/current/api/twisted.internet.interfaces.IProtocolFactory.html
+        .. _IHalfCloseableProtocol: http://twistedmatrix.com/documents/current/api/twisted.internet.interfaces.IHalfCloseableProtocol.html
+        """
         transport = CurveCPClientTransport(
             self.reactor, self.serverKey, fac, self.host, self.port,
             self.serverExtension, self.clientKey, self.clientExtension)
@@ -74,5 +83,14 @@ class CurveCPServerEndpoint(object):
         self.serverKey = serverKey
 
     def listen(self, fac):
+        """
+        Listen for incoming CurveCP connections.
+
+        :param fac: An `IProtocolFactory`_ provider whose ``buildProtocol``
+            returns an `IHalfCloseableProtocol`_ provider.
+
+        .. _IProtocolFactory: http://twistedmatrix.com/documents/current/api/twisted.internet.interfaces.IProtocolFactory.html
+        .. _IHalfCloseableProtocol: http://twistedmatrix.com/documents/current/api/twisted.internet.interfaces.IHalfCloseableProtocol.html
+        """
         dispatcher = CurveCPServerDispatcher(self.reactor, self.serverKey, fac)
         return defer.succeed(self.reactor.listenUDP(self.port, dispatcher))

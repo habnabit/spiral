@@ -9,8 +9,10 @@ API
 .. module:: spiral.curvecp
 
 .. autoclass:: CurveCPClientEndpoint(reactor, host, port, serverKey, serverExtension='\\x00' * 16, clientKey=None, clientExtension='\\x00' * 16)
+   :members: connect
 
 .. autoclass:: CurveCPServerEndpoint(reactor, serverKey, port)
+   :members: listen
 
 
 .. module:: spiral.curvecp.address
