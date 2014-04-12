@@ -32,5 +32,4 @@ def getLogObserver(verbosity):
 
 
 def startLogging(verbosity):
-    log.defaultObserver.stop()
-    log.addObserver(getLogObserver(verbosity))
+    log.startLoggingWithObserver(getLogObserver(verbosity))

@@ -10,6 +10,8 @@ from twisted.internet.utils import getProcessOutput
 from twisted.internet import defer, task
 from twisted.trial import unittest
 
+from spiral.keys import Keydir
+from spiral.scripts import curvecpmclient, curvecpmserver
 from spiral.test.util import BoringProcess
 
 
@@ -125,10 +127,75 @@ class TestsBase(object):
             buildTest(locals(), clientArgFunc, serverArgFunc)
 
 
+class Bag(object):
+    pass
+
+
 class AcceptanceTests(TestsBase, unittest.TestCase):
     @pytest.fixture(autouse=True)
     def init_tmpdir(self, tmpdir):
         self.tmpdir = tmpdir
+
+    def clientArgsBag(self, command):
+        clientArgs = Bag()
+        clientArgs.program = 'socat'
+        clientArgs.argv = ['fd:6!!fd:7', 'system:' + command]
+        clientArgs.host = '127.0.0.1'
+        clientArgs.port = self.port
+        clientArgs.key = self.key
+        clientArgs.client_keydir = None
+        clientArgs.client_extension = '0' * 32
+        clientArgs.server_extension = '0' * 32
+        clientArgs.verbosity = 'success'
+        return clientArgs
+
+    @defer.inlineCallbacks
+    def test_curvecpmclient_script_client_receives(self):
+        from twisted.internet import reactor
+        command = 'echo spam eggs'
+        serverProc = self.setUpServer(curvecpServer, command)
+
+        clientOut = self.tmpdir.join('client-out')
+        clientArgs = self.clientArgsBag('cat >' + pipes.quote(clientOut.strpath))
+        yield curvecpmclient.twistedMain(reactor, clientArgs)
+        serverProc.transport.signalProcess('TERM')
+        yield self.assertFailure(serverProc.deferred, ProcessDone, ProcessTerminated)
+        assert clientOut.read() == 'spam eggs\n'
+
+    @defer.inlineCallbacks
+    def test_curvecpmclient_script_server_receives(self):
+        from twisted.internet import reactor
+        serverOut = self.tmpdir.join('server-out')
+        command = 'cat >' + pipes.quote(serverOut.strpath)
+        serverProc = self.setUpServer(curvecpServer, command)
+
+        clientArgs = self.clientArgsBag('echo eggs spam')
+        yield curvecpmclient.twistedMain(reactor, clientArgs)
+        serverProc.transport.signalProcess('TERM')
+        yield self.assertFailure(serverProc.deferred, ProcessDone, ProcessTerminated)
+        assert serverOut.read() == 'eggs spam\n'
+
+    @defer.inlineCallbacks
+    def test_curvecpmserver_script(self):
+        from twisted.internet import reactor
+        serverOut = self.tmpdir.join('server-out')
+        command = 'echo spam eggs; cat >' + pipes.quote(serverOut.strpath)
+        serverArgs = Bag()
+        serverArgs.program = 'sh'
+        serverArgs.argv = ['-c', command]
+        serverArgs.keydir = Keydir(self.keydir)
+        serverArgs.port = self.port
+        serverArgs.verbosity = 'success'
+        serverDeferred = curvecpmserver.twistedMain(reactor, serverArgs)
+        clientProc = self.setUpClient(curvecpClient)
+
+        clientProc.transport.writeToChild(0, 'eggs spam')
+        clientProc.transport.closeStdin()
+        yield self.assertFailure(clientProc.deferred, ProcessDone)
+        assert serverOut.read() == 'eggs spam'
+        assert clientProc.recorded[1] == 'spam eggs\n'
+        serverDeferred.cancel()
+        yield self.assertFailure(serverDeferred, defer.CancelledError)
 
 
 class PerformanceTests(TestsBase):

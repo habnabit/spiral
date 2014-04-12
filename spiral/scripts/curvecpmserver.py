@@ -56,8 +56,15 @@ def twistedMain(reactor, args):
     _curvecpm.startLogging(args.verbosity)
     fac = CurveCPMServerFactory(reactor, args)
     e = CurveCPServerEndpoint(reactor, args.port, args.keydir)
-    e.listen(fac)
-    return defer.Deferred()
+    d = e.listen(fac)
+
+    def gotListeningPort(listeningPort):
+        def cancel(d):
+            listeningPort.stopListening()
+
+        return defer.Deferred(cancel)
+
+    return d.addCallback(gotListeningPort)
 
 def main(argv=sys.argv):
     parser = argparse.ArgumentParser()
