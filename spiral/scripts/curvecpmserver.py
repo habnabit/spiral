@@ -1,5 +1,6 @@
 import argparse
 import os
+import sys
 
 from twisted.internet.task import react
 from twisted.internet import defer, protocol
@@ -58,7 +59,7 @@ def twistedMain(reactor, args):
     e.listen(fac)
     return defer.Deferred()
 
-def main():
+def main(argv=sys.argv):
     parser = argparse.ArgumentParser()
     _curvecpm.addLogArguments(parser)
     parser.add_argument('-n', '--name')
@@ -68,4 +69,4 @@ def main():
     parser.add_argument('program')
     parser.add_argument('argv', nargs='*')
 
-    react(twistedMain, [parser.parse_args()])
+    react(twistedMain, [parser.parse_args(argv[1:])])

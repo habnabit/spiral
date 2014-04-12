@@ -1,5 +1,6 @@
 import argparse
 import os
+import sys
 
 from nacl.public import PublicKey
 from twisted.internet.task import react
@@ -83,7 +84,7 @@ def twistedMain(reactor, args):
 
     return d
 
-def main():
+def main(argv=sys.argv):
     parser = argparse.ArgumentParser()
     _curvecpm.addLogArguments(parser)
     parser.add_argument('-n', '--name')
@@ -96,4 +97,4 @@ def main():
     parser.add_argument('program')
     parser.add_argument('argv', nargs='*')
 
-    react(twistedMain, [parser.parse_args()])
+    react(twistedMain, [parser.parse_args(argv[1:])])
